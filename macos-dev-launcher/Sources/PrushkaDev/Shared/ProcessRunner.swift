@@ -36,22 +36,23 @@ final class ManagedProcess: @unchecked Sendable {
     }
 }
 
-/// Runs commands with a PATH taken once from a login shell, so `pnpm` / `go` / `bun` resolve
-/// without invoking `zsh -lc` on every click (a login shell can also `cd` away from the repo).
+/// Runs commands with a PATH taken once from an interactive login shell, so `pnpm` / `go` / `bun`
+/// resolve (bun is often exported from `.zshrc`, which non-interactive `zsh -lc` skips).
 enum ProcessRunner {
-    static func captureLoginPath(timeout: Duration = .seconds(6)) async -> String {
+    static func captureLoginPath(timeout: Duration = .seconds(8)) async -> String {
+        // `-i` loads `.zshrc` where bun/nvm/asdf hooks usually live; GUI apps otherwise miss them.
         let output = await run(
-            arguments: ["/bin/zsh", "-lc", "printf %s \"$PATH\""],
+            arguments: ["/bin/zsh", "-ilc", "printf %s \"$PATH\""],
             cwd: nil,
-            extraPath: nil,
+            extraPath: developerPath(),
             timeout: timeout
         )
         let line = output.stdout.split(whereSeparator: \.isNewline).last.map(String.init) ?? ""
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.contains("/") {
-            return trimmed
+            return mergePaths(trimmed, developerPath())
         }
-        return fallbackPath()
+        return developerPath()
     }
 
     static func run(
@@ -180,13 +181,46 @@ enum ProcessRunner {
     private static func environment(extraPath: String?) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
         let login = extraPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        env["PATH"] = login.isEmpty ? (env["PATH"] ?? fallbackPath()) : login
+        let base = login.isEmpty ? (env["PATH"] ?? "") : login
+        env["PATH"] = mergePaths(base, developerPath())
         env["NO_COLOR"] = "1"
+        // Bun and some CLIs read HOME; keep it explicit when the parent env is sparse.
+        if env["HOME"]?.isEmpty != false {
+            env["HOME"] = NSHomeDirectory()
+        }
         return env
     }
 
-    private static func fallbackPath() -> String {
-        "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    /// Directories GUI-launched apps often miss compared to a Terminal session.
+    private static func developerPath() -> String {
+        let home = NSHomeDirectory()
+        return [
+            "\(home)/.bun/bin",
+            "\(home)/.local/bin",
+            "\(home)/.cargo/bin",
+            "\(home)/bin",
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+        ].joined(separator: ":")
+    }
+
+    private static func mergePaths(_ parts: String...) -> String {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for part in parts {
+            for raw in part.split(separator: ":", omittingEmptySubsequences: true) {
+                let item = String(raw)
+                if seen.insert(item).inserted {
+                    ordered.append(item)
+                }
+            }
+        }
+        return ordered.joined(separator: ":")
     }
 }
 
