@@ -59,8 +59,32 @@ enum ProcessRunner {
         cwd: URL?,
         extraPath: String?,
         timeout: Duration? = nil,
+        coalesce: Duration? = .milliseconds(80),
         onChunk: (@Sendable (String) -> Void)? = nil,
         onStart: (@Sendable (ManagedProcess) -> Void)? = nil
+    ) async -> CommandOutput {
+        // Hop off the caller's actor (often MainActor) before any Process I/O.
+        await Task.detached(priority: .userInitiated) {
+            await execute(
+                arguments: arguments,
+                cwd: cwd,
+                extraPath: extraPath,
+                timeout: timeout,
+                coalesce: coalesce,
+                onChunk: onChunk,
+                onStart: onStart
+            )
+        }.value
+    }
+
+    private static func execute(
+        arguments: [String],
+        cwd: URL?,
+        extraPath: String?,
+        timeout: Duration?,
+        coalesce: Duration?,
+        onChunk: (@Sendable (String) -> Void)?,
+        onStart: (@Sendable (ManagedProcess) -> Void)?
     ) async -> CommandOutput {
         let managed = ManagedProcess()
         let process = managed.process
@@ -76,17 +100,33 @@ enum ProcessRunner {
         process.environment = environment(extraPath: extraPath)
         process.qualityOfService = .userInitiated
 
+        let pump: StreamPump?
+        let chunkHandler: (@Sendable (String) -> Void)?
+        if let onChunk {
+            if let coalesce, coalesce > .zero {
+                let created = StreamPump(interval: coalesce, emit: onChunk)
+                pump = created
+                chunkHandler = { created.push($0) }
+            } else {
+                pump = nil
+                chunkHandler = onChunk
+            }
+        } else {
+            pump = nil
+            chunkHandler = nil
+        }
+
         let stdoutBox = LockedString()
         let stderrBox = LockedString()
         let readers = DispatchGroup()
         readers.enter()
         DispatchQueue.global(qos: .userInitiated).async {
-            stdoutBox.set(stdoutReader.readAll(onChunk: onChunk))
+            stdoutBox.set(stdoutReader.readAll(onChunk: chunkHandler))
             readers.leave()
         }
         readers.enter()
         DispatchQueue.global(qos: .userInitiated).async {
-            stderrBox.set(stderrReader.readAll(onChunk: onChunk))
+            stderrBox.set(stderrReader.readAll(onChunk: chunkHandler))
             readers.leave()
         }
 
@@ -100,10 +140,12 @@ enum ProcessRunner {
             stdoutReader.close()
             stderrReader.close()
             await readers.wait()
+            pump?.flush()
             return CommandOutput(code: 127, stdout: "", stderr: error.localizedDescription, cancelled: false)
         }
 
         await readers.wait()
+        pump?.flush()
         return CommandOutput(
             code: exitCode,
             stdout: stdoutBox.get(),
@@ -145,6 +187,46 @@ enum ProcessRunner {
 
     private static func fallbackPath() -> String {
         "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    }
+}
+
+/// Batches stdout/stderr chunks so the UI is not flooded with MainActor updates.
+private final class StreamPump: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer = ""
+    private var scheduled = false
+    private let interval: Duration
+    private let emit: @Sendable (String) -> Void
+
+    init(interval: Duration, emit: @escaping @Sendable (String) -> Void) {
+        self.interval = interval
+        self.emit = emit
+    }
+
+    func push(_ chunk: String) {
+        guard !chunk.isEmpty else { return }
+        lock.lock()
+        buffer += chunk
+        let shouldSchedule = !scheduled
+        if shouldSchedule {
+            scheduled = true
+        }
+        lock.unlock()
+        guard shouldSchedule else { return }
+        Task.detached(priority: .utility) { [interval] in
+            try? await Task.sleep(for: interval)
+            self.flush()
+        }
+    }
+
+    func flush() {
+        lock.lock()
+        let batch = buffer
+        buffer = ""
+        scheduled = false
+        lock.unlock()
+        guard !batch.isEmpty else { return }
+        emit(batch)
     }
 }
 

@@ -19,10 +19,12 @@ enum Safety {
         "up.sh", "down.sh", "status.sh"
     ]
 
-    /// First argv token for registry tools (no raw shell).
+    /// First argv token for registry tools / quality jobs (no raw shell).
     static let allowedToolBinaries: Set<String> = [
-        "pnpm", "node", "npm", "bun", "npx"
+        "pnpm", "node", "npm", "bun", "npx", "sh", "/bin/sh"
     ]
+
+    static let knownQualityJobIDs: Set<String> = Set(QualityCatalog.jobs.map(\.id))
 
     static let allowedScriptArgs: Set<String> = Set([
         "dev", "prod", "all",
@@ -37,6 +39,7 @@ enum Safety {
         case badScriptArg(String)
         case unknownUnit(String)
         case unknownTool(String)
+        case unknownQualityJob(String)
         case badToolBinary(String)
         case badToolToken(String)
         case badToolValue(String)
@@ -58,6 +61,8 @@ enum Safety {
                 "Unknown unit: \(id)"
             case .unknownTool(let id):
                 "Unknown tool: \(id)"
+            case .unknownQualityJob(let id):
+                "Unknown quality job: \(id)"
             case .badToolBinary(let name):
                 "Tool binary not allowed: \(name)"
             case .badToolToken(let token):
@@ -160,6 +165,28 @@ enum Safety {
         case .success(let cwd):
             return .success((tool.command, cwd))
         }
+    }
+
+    static func validateQualityJob(_ job: QualityJob, root: URL) -> Result<(command: [String], cwd: URL), Failure> {
+        guard knownQualityJobIDs.contains(job.id),
+              let canonical = QualityCatalog.job(id: job.id),
+              canonical == job
+        else {
+            return .failure(.unknownQualityJob(job.id))
+        }
+        guard !job.command.isEmpty else {
+            return .failure(.badToolBinary(""))
+        }
+        let binary = job.command[0]
+        guard allowedToolBinaries.contains(binary) else {
+            return .failure(.badToolBinary(binary))
+        }
+        for token in job.command {
+            guard isSafeCommandToken(token) else {
+                return .failure(.badToolToken(token))
+            }
+        }
+        return containedDirectory(relative: job.cwd, root: root).map { (job.command, $0) }
     }
 
     static func sanitizeToolValue(_ raw: String, type: String) -> Result<String, Failure> {

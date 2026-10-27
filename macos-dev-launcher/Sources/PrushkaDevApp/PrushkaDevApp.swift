@@ -6,7 +6,7 @@ struct PrushkaDevApp: App {
     @State private var model = LauncherModel()
 
     var body: some Scene {
-        WindowGroup("Prushka L") {
+        WindowGroup {
             RootView()
                 .environment(model)
                 .task { await model.bootstrap() }
@@ -14,5 +14,6 @@ struct PrushkaDevApp: App {
         }
         .defaultSize(width: 1040, height: 740)
         .windowResizability(.contentMinSize)
+        .windowStyle(.hiddenTitleBar)
     }
 }

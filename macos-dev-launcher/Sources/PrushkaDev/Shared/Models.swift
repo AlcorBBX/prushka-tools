@@ -164,6 +164,7 @@ enum UnitFace {
 
 enum AppSection: String, CaseIterable, Identifiable, Sendable {
     case services
+    case checks
     case tools
     case logs
     case settings
@@ -173,6 +174,7 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .services: "Services"
+        case .checks: "Checks"
         case .tools: "Tools"
         case .logs: "Logs"
         case .settings: "Settings"
@@ -182,6 +184,7 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
     var subtitle: String {
         switch self {
         case .services: "Start, stop, and watch local apps"
+        case .checks: "Lint, format, tests, and git hook scenarios"
         case .tools: "Tab source and demo scripts"
         case .logs: "Output from units started here"
         case .settings: "Checkout path for this launcher"
@@ -191,6 +194,7 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
     var symbol: String {
         switch self {
         case .services: "square.stack.3d.up.fill"
+        case .checks: "checkmark.seal.fill"
         case .tools: "wrench.and.screwdriver.fill"
         case .logs: "text.alignleft"
         case .settings: "gearshape.fill"

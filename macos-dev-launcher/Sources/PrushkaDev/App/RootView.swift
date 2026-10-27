@@ -42,6 +42,7 @@ public struct RootView: View {
             }
         }
         .background(LauncherTheme.canvas(scheme).ignoresSafeArea())
+        .background(WindowChromeBinder(scheme: scheme))
         .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.88), value: layout)
         .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.86), value: model.section)
     }
@@ -64,6 +65,8 @@ public struct RootView: View {
         switch model.section {
         case .services:
             ServicesView()
+        case .checks:
+            ChecksView()
         case .tools:
             ToolsView()
         case .logs:

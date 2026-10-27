@@ -16,15 +16,17 @@ struct ServicesView: View {
                 missingRoot
             } else {
                 ForEach(ServiceGroup.allCases) { group in
-                    VStack(alignment: .leading, spacing: 8) {
-                        SectionLabel(group.title)
-                        GroupedCard {
-                            let ids = group.unitIDs
-                            ForEach(Array(ids.enumerated()), id: \.element) { index, id in
-                                if index > 0 {
-                                    CardDivider()
+                    let families = ServiceCatalog.families(in: group)
+                    if !families.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            SectionLabel(group.title)
+                            GroupedCard {
+                                ForEach(Array(families.enumerated()), id: \.element.id) { index, family in
+                                    if index > 0 {
+                                        CardDivider()
+                                    }
+                                    ServiceFamilyRow(family: family)
                                 }
-                                ServiceRow(unitID: id)
                             }
                         }
                     }
@@ -58,108 +60,200 @@ struct ServicesView: View {
     }
 
     private var actions: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             SectionLabel("Session")
-            GroupedCard {
-                HStack(spacing: 12) {
-                    Button {
-                        Task { await model.startDefault() }
-                    } label: {
-                        actionLabel("Start default", systemImage: "play.fill", prominent: true)
-                    }
-                    .buttonStyle(PressStyle())
-                    .disabled(model.isBusy("bundle"))
-
-                    Button {
-                        Task { await model.stopAll() }
-                    } label: {
-                        actionLabel("Stop all", systemImage: "stop.fill", prominent: false)
-                    }
-                    .buttonStyle(PressStyle())
-                    .disabled(model.isBusy("bundle"))
-
-                    Spacer(minLength: 0)
-                    if model.isBusy("bundle") {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
+            HStack(alignment: .center, spacing: 10) {
+                Button {
+                    Task { await model.startDefault() }
+                } label: {
+                    Label("Start default", systemImage: "play.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .foregroundStyle(.white)
+                        .background {
+                            Capsule(style: .continuous)
+                                .fill(LauncherTheme.tint(.services))
+                        }
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+                .buttonStyle(PressStyle())
+                .disabled(model.isBusy("bundle"))
+
+                Button {
+                    Task { await model.stopAll() }
+                } label: {
+                    Label("Stop all", systemImage: "stop.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .foregroundStyle(.red.opacity(0.95))
+                        .background {
+                            Capsule(style: .continuous)
+                                .strokeBorder(Color.red.opacity(0.35), lineWidth: 1)
+                        }
+                }
+                .buttonStyle(PressStyle())
+                .disabled(model.isBusy("bundle"))
+
+                if model.isBusy("bundle") {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(.leading, 2)
+                }
+
+                Spacer(minLength: 8)
+
+                Text(model.checkedLabel)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
             }
-            Text("Default starts web dev and stems dev. Prod rows build first, then serve the bundle. Open uses the same localhost address Vite prints. Last check \(model.checkedLabel).")
+            .padding(.horizontal, 4)
+
+            Text("Default starts web and stems (dev). Prod builds first, then serves. Click a row for live logs.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
         }
     }
-
-    private func actionLabel(_ title: String, systemImage: String, prominent: Bool) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(.system(size: 13, weight: .semibold))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .foregroundStyle(prominent ? Color.white : Color.primary)
-            .background {
-                Capsule(style: .continuous)
-                    .fill(prominent ? LauncherTheme.tint(.services) : Color.primary.opacity(0.08))
-            }
-    }
 }
 
-private struct ServiceRow: View {
+private struct ServiceFamilyRow: View {
     @Environment(LauncherModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let unitID: String
+    @Environment(\.colorScheme) private var scheme
+    let family: ServiceFamily
+
+    @State private var selectedVariantID: String = ""
+
+    private var selectedVariant: ServiceVariant {
+        family.variant(id: selectedVariantID.isEmpty ? preferredVariantID : selectedVariantID)
+            ?? family.variants[0]
+    }
+
+    private var preferredVariantID: String {
+        if let running = family.variants.first(where: { model.unit(id: $0.id)?.isRunning == true }) {
+            return running.id
+        }
+        return family.defaultVariantID
+    }
+
+    private var unitID: String { selectedVariant.id }
+
+    private var unit: UnitStatus? { model.unit(id: unitID) }
+
+    private var running: Bool { unit?.isRunning == true }
+
+    private var log: ServiceLogState { model.serviceLog(for: unitID) }
+
+    private var isLogExpanded: Bool {
+        model.expandedServiceFamilyID == family.id
+    }
+
+    private var showsCollapsedPreview: Bool {
+        running && !log.lastLine.isEmpty
+    }
 
     var body: some View {
-        let unit = model.unit(id: unitID)
-        let running = unit?.isRunning == true
-        ViewThatFits(in: .horizontal) {
-            wide(unit: unit, running: running)
-            stacked(unit: unit, running: running)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-    }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 12) {
+                Button {
+                    withAnimation(LauncherMotion.easeOut(reduceMotion: reduceMotion)) {
+                        model.toggleServiceExpansion(family.id)
+                    }
+                    if model.expandedServiceFamilyID == family.id {
+                        model.refreshServiceLog(unitID: unitID)
+                    }
+                } label: {
+                    headerMain
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .pointingHandCursor()
 
-    private func wide(unit: UnitStatus?, running: Bool) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            identity(unit: unit, running: running)
-            Spacer(minLength: 12)
-            controls(unit: unit, running: running)
-        }
-    }
+                ExpandingModePicker(
+                    options: family.variants.map(\.modeOption),
+                    selection: selectedVariantBinding
+                )
 
-    private func stacked(unit: UnitStatus?, running: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            identity(unit: unit, running: running)
-            HStack {
-                Spacer(minLength: 0)
-                controls(unit: unit, running: running)
+                controls
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+
+            if !isLogExpanded, showsCollapsedPreview {
+                Button {
+                    withAnimation(LauncherMotion.easeOut(reduceMotion: reduceMotion)) {
+                        model.toggleServiceExpansion(family.id)
+                    }
+                    model.refreshServiceLog(unitID: unitID)
+                } label: {
+                    collapsedPreview
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .pointingHandCursor()
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
+                .transition(logTransition)
+            }
+
+            if isLogExpanded {
+                expandedLog
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 12)
+                    .transition(logTransition)
+            }
+        }
+        .animation(LauncherMotion.easeOut(reduceMotion: reduceMotion), value: isLogExpanded)
+        .onAppear {
+            if selectedVariantID.isEmpty {
+                selectedVariantID = preferredVariantID
+            }
+            if running {
+                model.refreshServiceLog(unitID: unitID)
+            }
+        }
+        .onChange(of: selectedVariantID) { _, newValue in
+            guard !newValue.isEmpty else { return }
+            model.refreshServiceLog(unitID: newValue)
+            if isLogExpanded {
+                model.selectLog(newValue)
             }
         }
     }
 
-    private func identity(unit: UnitStatus?, running: Bool) -> some View {
+    private var logTransition: AnyTransition {
+        .asymmetric(
+            insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .top)),
+            removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
+        )
+    }
+
+    private var selectedVariantBinding: Binding<String> {
+        Binding(
+            get: { selectedVariantID.isEmpty ? preferredVariantID : selectedVariantID },
+            set: { selectedVariantID = $0 }
+        )
+    }
+
+    private var headerMain: some View {
         HStack(alignment: .center, spacing: 10) {
             StatusDot(running: running)
+
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(UnitFace.title(for: unitID))
-                        .font(.system(size: 15, weight: .medium))
-                    if !UnitFace.chip(for: unitID).isEmpty {
-                        ModeChip(title: UnitFace.chip(for: unitID))
-                    }
-                }
-                statusChips(unit: unit, running: running)
+                Text(family.title)
+                    .font(.system(size: 15, weight: .medium))
+                statusChips
             }
+
+            Spacer(minLength: 8)
         }
-        .accessibilityElement(children: .combine)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
-    private func statusChips(unit: UnitStatus?, running: Bool) -> some View {
+    private var statusChips: some View {
         HStack(spacing: 5) {
             StatusChip(
                 title: running ? "Running" : "Stopped",
@@ -182,7 +276,7 @@ private struct ServiceRow: View {
         }
     }
 
-    private func controls(unit: UnitStatus?, running: Bool) -> some View {
+    private var controls: some View {
         HStack(spacing: 10) {
             if model.isBusy(unitID) {
                 ProgressView()
@@ -202,12 +296,6 @@ private struct ServiceRow: View {
                     model.open(urlString: url)
                 }
             }
-            rowButton("Logs", role: .logs) {
-                withAnimation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.86)) {
-                    model.selectLog(unitID)
-                    model.section = .logs
-                }
-            }
         }
         .layoutPriority(1)
     }
@@ -216,16 +304,69 @@ private struct ServiceRow: View {
         case start
         case stop
         case open
-        case logs
     }
 
     private func rowButton(_ title: String, role: RowRole, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(role == .stop ? Color.red : (role == .logs ? Color.secondary : LauncherTheme.tint(.services)))
+                .foregroundStyle(role == .stop ? Color.red : LauncherTheme.tint(.services))
         }
         .buttonStyle(PressStyle())
-        .disabled(model.isBusy(unitID) && role != .open && role != .logs)
+        .disabled(model.isBusy(unitID) && role != .open)
+    }
+
+    private var collapsedPreview: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(running ? Color.green : Color.secondary)
+                .frame(width: 6, height: 6)
+            Text(log.lastLine)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(LauncherTheme.field(scheme))
+        }
+    }
+
+    private var expandedLog: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(running ? "Live log · \(selectedVariant.chip)" : "Log · \(selectedVariant.chip)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if running, !log.lastLine.isEmpty {
+                    Text(log.lastLine)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .frame(maxWidth: 220, alignment: .trailing)
+                }
+            }
+            ConsolePane(
+                source: log,
+                revision: log.logRevision,
+                isLive: running,
+                emptyPlaceholder: "No log yet. Start from the launcher to capture output."
+            )
+            .frame(minHeight: 160, maxHeight: 280)
+            .padding(6)
+            .background {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(LauncherTheme.field(scheme))
+            }
+        }
+        .padding(.top, 2)
+        .onAppear {
+            model.selectLog(unitID)
+            model.refreshServiceLog(unitID: unitID)
+        }
     }
 }

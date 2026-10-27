@@ -237,6 +237,7 @@ private struct SlidingToolTabs: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .pointingHandCursor()
                 .accessibilityLabel(tool.label)
                 .accessibilityAddTraits(active ? .isSelected : [])
             }

@@ -21,10 +21,15 @@ public final class LauncherModel {
     var toolOutputTitle = ""
     var selectedLogID = "web-dev"
     var logText = ""
+    var expandedQualityJobID: String?
+    var qualityRuns: [String: QualityRunState] = [:]
+    var expandedServiceFamilyID: String?
+    var serviceLogs: [String: ServiceLogState] = [:]
 
     private var didBoot = false
     private var loginPath = ""
     private var pollTask: Task<Void, Never>?
+    private var serviceLogPollTask: Task<Void, Never>?
     private var statusChain: Task<Void, Never>?
     private var activeProcess: ManagedProcess?
 
@@ -179,6 +184,39 @@ public final class LauncherModel {
         }
     }
 
+    func serviceLog(for unitID: String) -> ServiceLogState {
+        if let existing = serviceLogs[unitID] {
+            return existing
+        }
+        let created = ServiceLogState()
+        serviceLogs[unitID] = created
+        return created
+    }
+
+    func toggleServiceExpansion(_ familyID: String) {
+        if expandedServiceFamilyID == familyID {
+            expandedServiceFamilyID = nil
+            stopServiceLogPolling()
+        } else {
+            expandedServiceFamilyID = familyID
+            startServiceLogPolling()
+        }
+    }
+
+    func refreshServiceLog(unitID: String) {
+        guard let root = validatedRoot else {
+            serviceLog(for: unitID).clear()
+            return
+        }
+        let preferred = unit(id: unitID)?.logFile
+        switch Safety.logFileURL(unitID: unitID, root: root, preferred: preferred) {
+        case .success(let url):
+            serviceLog(for: unitID).applyFileTail(LogTail.read(path: url.path))
+        case .failure:
+            serviceLog(for: unitID).clear()
+        }
+    }
+
     func run(tool: RegistryTool, text: [String: String], flags: [String: Bool]) async {
         guard let root = validatedRoot else {
             actionError = "Choose the Prushka checkout in Settings."
@@ -265,6 +303,93 @@ public final class LauncherModel {
         busyIDs.contains("tool:\(id)")
     }
 
+    func qualityRun(for id: String) -> QualityRunState {
+        if let existing = qualityRuns[id] {
+            return existing
+        }
+        let created = QualityRunState()
+        qualityRuns[id] = created
+        return created
+    }
+
+    func toggleQualityExpansion(_ id: String) {
+        if expandedQualityJobID == id {
+            expandedQualityJobID = nil
+        } else {
+            expandedQualityJobID = id
+        }
+    }
+
+    func runQuality(_ job: QualityJob) async {
+        guard let root = validatedRoot else {
+            actionError = "Choose the Prushka checkout in Settings."
+            return
+        }
+        let busy = "quality:\(job.id)"
+        guard !busyIDs.contains(busy) else { return }
+
+        let prepared: (command: [String], cwd: URL)
+        switch Safety.validateQualityJob(job, root: root) {
+        case .failure(let error):
+            actionError = error.localizedDescription
+            return
+        case .success(let value):
+            prepared = value
+        }
+
+        let state = qualityRun(for: job.id)
+        if state.isRunning {
+            return
+        }
+        state.resetForRun()
+        busyIDs.insert(busy)
+        actionError = nil
+
+        let output = await ProcessRunner.run(
+            arguments: prepared.command,
+            cwd: prepared.cwd,
+            extraPath: loginPath,
+            coalesce: .milliseconds(120),
+            onChunk: { [weak self] chunk in
+                Task { @MainActor in
+                    self?.qualityRun(for: job.id).append(chunk)
+                }
+            },
+            onStart: { [weak self] process in
+                Task { @MainActor in
+                    guard let self else { return }
+                    // Resolve once up front so later coalesced chunks don't recreate dictionary entries.
+                    self.qualityRun(for: job.id).process = process
+                }
+            }
+        )
+
+        busyIDs.remove(busy)
+        state.process = nil
+        state.exitCode = output.code
+        if output.cancelled {
+            state.outcome = .cancelled
+            state.append("\nCancelled.\n")
+        } else if output.code == 0 {
+            state.outcome = .succeeded
+            if state.lastLine.isEmpty || state.lastLine == "Starting…" {
+                state.lastLine = "Finished successfully"
+            }
+        } else {
+            state.outcome = .failed
+            if state.consoleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                state.append(output.combined.isEmpty ? "Failed (\(output.code))\n" : output.combined + "\n")
+            }
+            if state.lastLine.isEmpty || state.lastLine == "Starting…" {
+                state.lastLine = "Failed (\(output.code))"
+            }
+        }
+    }
+
+    func cancelQuality(_ id: String) {
+        qualityRun(for: id).process?.terminate()
+    }
+
     private func appendToolOutput(_ chunk: String) {
         toolOutput += chunk
         if toolOutput.count > 200_000 {
@@ -324,6 +449,12 @@ public final class LauncherModel {
             units = document.units.filter { Safety.knownUnitIDs.contains($0.id) }
             checkedAt = document.checkedAt
             reloadLog()
+            for unit in units where unit.isRunning {
+                refreshServiceLog(unitID: unit.id)
+            }
+            if expandedServiceFamilyID != nil {
+                refreshExpandedServiceLogs()
+            }
         }
     }
 
@@ -382,12 +513,39 @@ public final class LauncherModel {
 
     private func startPolling() {
         pollTask?.cancel()
-        pollTask = Task {
+        pollTask = Task { @MainActor in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(2))
                 guard !Task.isCancelled else { return }
+                // Avoid fighting the UI while a long tool/check is streaming output.
+                if !busyIDs.isEmpty { continue }
                 await refreshStatus()
             }
+        }
+    }
+
+    private func startServiceLogPolling() {
+        serviceLogPollTask?.cancel()
+        serviceLogPollTask = Task { @MainActor in
+            while !Task.isCancelled {
+                refreshExpandedServiceLogs()
+                try? await Task.sleep(for: .milliseconds(700))
+                guard !Task.isCancelled else { return }
+            }
+        }
+    }
+
+    private func stopServiceLogPolling() {
+        serviceLogPollTask?.cancel()
+        serviceLogPollTask = nil
+    }
+
+    private func refreshExpandedServiceLogs() {
+        guard let familyID = expandedServiceFamilyID,
+              let family = ServiceCatalog.families.first(where: { $0.id == familyID })
+        else { return }
+        for variant in family.variants {
+            refreshServiceLog(unitID: variant.id)
         }
     }
 

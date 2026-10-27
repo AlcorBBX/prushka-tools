@@ -59,6 +59,10 @@ struct ModeChip: View {
         switch title {
         case "Prod": Color(red: 0.93, green: 0.55, blue: 0.28)
         case "Memory": LauncherTheme.tint(.settings)
+        case "Fix": Color(red: 0.20, green: 0.72, blue: 0.48)
+        case "Check": Color(red: 0.22, green: 0.48, blue: 0.98)
+        case "Hook": Color(red: 0.58, green: 0.34, blue: 0.96)
+        case "Run": Color(red: 0.16, green: 0.70, blue: 0.78)
         default: LauncherTheme.tint(.services)
         }
     }
@@ -222,9 +226,10 @@ struct SidebarColumn: View {
     private func shortcut(for section: AppSection) -> KeyEquivalent {
         switch section {
         case .services: "1"
-        case .tools: "2"
-        case .logs: "3"
-        case .settings: "4"
+        case .checks: "2"
+        case .tools: "3"
+        case .logs: "4"
+        case .settings: "5"
         }
     }
 }
