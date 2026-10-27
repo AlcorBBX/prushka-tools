@@ -4,8 +4,10 @@ enum RepoRoot {
     static let defaultsKey = "repoRoot"
 
     static func isRepo(_ path: String) -> Bool {
-        let marker = (path as NSString).appendingPathComponent("scripts/registry.json")
-        return FileManager.default.fileExists(atPath: marker)
+        if case .success = Safety.validateRepo(path) {
+            return true
+        }
+        return false
     }
 
     static func resolve(
@@ -14,7 +16,7 @@ enum RepoRoot {
         ignoringSaved: Bool = false
     ) -> String {
         if !ignoringSaved, let saved = defaults.string(forKey: defaultsKey), isRepo(saved) {
-            return saved
+            return URL(fileURLWithPath: saved).standardizedFileURL.path
         }
         for hint in hints {
             if let found = walk(from: hint) {
@@ -32,8 +34,8 @@ enum RepoRoot {
         }
 
         for _ in 0..<12 {
-            if isRepo(current.path) {
-                return current
+            if case .success(let url) = Safety.validateRepo(current.path) {
+                return url
             }
             let parent = current.deletingLastPathComponent()
             if parent.path == current.path {

@@ -32,8 +32,15 @@ public final class LauncherModel {
         RepoRoot.isRepo(repoRoot)
     }
 
+    var validatedRoot: URL? {
+        if case .success(let url) = Safety.validateRepo(repoRoot) {
+            return url
+        }
+        return nil
+    }
+
     var tools: [RegistryTool] {
-        registry?.tools ?? []
+        (registry?.tools ?? []).filter { Safety.knownToolIDs.contains($0.id) }
     }
 
     var selectedTool: RegistryTool? {
@@ -72,16 +79,27 @@ public final class LauncherModel {
 
     func setRepoRoot(_ path: String) {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        UserDefaults.standard.set(trimmed, forKey: RepoRoot.defaultsKey)
-        repoRoot = trimmed
-        Task { await reloadFromDisk() }
+        switch Safety.validateRepo(trimmed) {
+        case .success(let url):
+            UserDefaults.standard.set(url.path, forKey: RepoRoot.defaultsKey)
+            repoRoot = url.path
+            actionError = nil
+            Task { await reloadFromDisk() }
+        case .failure(let error):
+            actionError = error.localizedDescription
+        }
     }
 
     func useDetectedRoot() {
         UserDefaults.standard.removeObject(forKey: RepoRoot.defaultsKey)
         detectedRoot = RepoRoot.resolve(ignoringSaved: true)
-        repoRoot = detectedRoot
-        Task { await reloadFromDisk() }
+        if RepoRoot.isRepo(detectedRoot) {
+            repoRoot = detectedRoot
+            actionError = nil
+            Task { await reloadFromDisk() }
+        } else {
+            actionError = Safety.Failure.invalidRepo.localizedDescription
+        }
     }
 
     func refreshStatus() async {
@@ -96,11 +114,30 @@ public final class LauncherModel {
     }
 
     func start(unitID: String) async {
-        await runScript(name: "up.sh", arguments: [unitID, "--bg"], busy: unitID)
+        switch Safety.validateUnitID(unitID) {
+        case .failure(let error):
+            actionError = error.localizedDescription
+        case .success(let id):
+            await runScript(name: "up.sh", arguments: [id, "--bg"], busy: id)
+        }
     }
 
     func stop(unitID: String) async {
-        await runScript(name: "down.sh", arguments: [unitID], busy: unitID)
+        switch Safety.validateUnitID(unitID) {
+        case .failure(let error):
+            actionError = error.localizedDescription
+        case .success(let id):
+            if unit(id: id)?.showsExternalBadge == true {
+                let ok = Confirm.ask(
+                    title: "Stop external process?",
+                    message: "\(UnitFace.title(for: id)) was not started by Prushka L. Stopping it will terminate whatever is on that port.",
+                    confirm: "Stop",
+                    style: .warning
+                )
+                guard ok else { return }
+            }
+            await runScript(name: "down.sh", arguments: [id], busy: id)
+        }
     }
 
     func startDefault() async {
@@ -108,6 +145,13 @@ public final class LauncherModel {
     }
 
     func stopAll() async {
+        let ok = Confirm.ask(
+            title: "Stop all services?",
+            message: "This stops every known Prushka unit, including processes started outside the launcher if they match the usual ports.",
+            confirm: "Stop all",
+            style: .warning
+        )
+        guard ok else { return }
         await runScript(name: "down.sh", arguments: [], busy: "bundle")
     }
 
@@ -119,24 +163,40 @@ public final class LauncherModel {
     }
 
     func open(urlString: String?) {
-        guard let urlString, let url = URL(string: urlString) else { return }
-        NSWorkspace.shared.open(url)
+        guard let urlString else { return }
+        switch Safety.openableURL(urlString) {
+        case .success(let url):
+            NSWorkspace.shared.open(url)
+        case .failure(let error):
+            actionError = error.localizedDescription
+        }
     }
 
     func selectLog(_ id: String) {
-        selectedLogID = id
-        reloadLog()
+        if case .success = Safety.validateUnitID(id) {
+            selectedLogID = id
+            reloadLog()
+        }
     }
 
     func run(tool: RegistryTool, text: [String: String], flags: [String: Bool]) async {
-        guard rootIsValid else {
+        guard let root = validatedRoot else {
             actionError = "Choose the Prushka checkout in Settings."
             return
         }
         let busy = "tool:\(tool.id)"
         guard !busyIDs.contains(busy) else { return }
 
-        var arguments = tool.command
+        let prepared: (command: [String], cwd: URL)
+        switch Safety.validateTool(tool, root: root) {
+        case .failure(let error):
+            actionError = error.localizedDescription
+            return
+        case .success(let value):
+            prepared = value
+        }
+
+        var arguments = prepared.command
         for arg in tool.args {
             if arg.type == "boolean" {
                 if flags[arg.name] == true {
@@ -144,26 +204,31 @@ public final class LauncherModel {
                 }
                 continue
             }
-            let value = text[arg.name]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if value.isEmpty {
+            let raw = text[arg.name]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if raw.isEmpty {
                 if arg.required {
                     actionError = "\(tool.label) needs \(arg.name)."
                     return
                 }
                 continue
             }
-            arguments.append(arg.flag)
-            arguments.append(value)
+            switch Safety.sanitizeToolValue(raw, type: arg.type) {
+            case .failure(let error):
+                actionError = error.localizedDescription
+                return
+            case .success(let value):
+                arguments.append(arg.flag)
+                arguments.append(value)
+            }
         }
 
         busyIDs.insert(busy)
         actionError = nil
         toolOutput = ""
         toolOutputTitle = tool.label
-        let cwd = URL(fileURLWithPath: repoRoot).appendingPathComponent(tool.cwd)
         let output = await ProcessRunner.run(
             arguments: arguments,
-            cwd: cwd,
+            cwd: prepared.cwd,
             extraPath: loginPath,
             onChunk: { [weak self] chunk in
                 Task { @MainActor in
@@ -213,55 +278,85 @@ public final class LauncherModel {
     }
 
     private func reloadRegistry() async {
-        let url = URL(fileURLWithPath: repoRoot).appendingPathComponent("scripts/registry.json")
+        guard let root = validatedRoot else {
+            registry = nil
+            return
+        }
+        let url = root.appendingPathComponent("scripts/registry.json")
         guard let data = try? Data(contentsOf: url),
               let decoded = try? JSONDecoder().decode(RegistryFile.self, from: data)
         else {
             registry = nil
             return
         }
-        registry = decoded
-        if !decoded.tools.contains(where: { $0.id == selectedToolID }) {
-            selectedToolID = decoded.tools.first?.id ?? selectedToolID
+        // Drop unknown tools/units from a tampered registry.
+        let safeTools = decoded.tools.filter { Safety.knownToolIDs.contains($0.id) }
+        let safeUnits = decoded.units.filter { Safety.knownUnitIDs.contains($0.id) }
+        registry = RegistryFile(version: decoded.version, units: safeUnits, tools: safeTools)
+        if !safeTools.contains(where: { $0.id == selectedToolID }) {
+            selectedToolID = safeTools.first?.id ?? selectedToolID
         }
     }
 
     private func loadStatus() async {
-        guard rootIsValid else {
+        guard let root = validatedRoot else {
             statusError = "Repository not found. Choose it in Settings."
             units = []
             reloadLog()
             return
         }
-        let script = URL(fileURLWithPath: repoRoot).appendingPathComponent("scripts/status.sh").path
-        let output = await ProcessRunner.run(
-            arguments: ["/bin/bash", script, "--json"],
-            cwd: URL(fileURLWithPath: repoRoot),
-            extraPath: loginPath
-        )
-        guard output.code == 0, let document = Self.decodeStatus(output.stdout) else {
-            statusError = Self.clip(output.combined, fallback: "status.sh failed (\(output.code))")
+        switch Safety.scriptURL(named: "status.sh", root: root) {
+        case .failure(let error):
+            statusError = error.localizedDescription
             reloadLog()
-            return
+        case .success(let script):
+            let output = await ProcessRunner.run(
+                arguments: ["/bin/bash", script.path, "--json"],
+                cwd: root,
+                extraPath: loginPath
+            )
+            guard output.code == 0, let document = Self.decodeStatus(output.stdout) else {
+                statusError = Self.clip(output.combined, fallback: "status.sh failed (\(output.code))")
+                reloadLog()
+                return
+            }
+            statusError = nil
+            units = document.units.filter { Safety.knownUnitIDs.contains($0.id) }
+            checkedAt = document.checkedAt
+            reloadLog()
         }
-        statusError = nil
-        units = document.units
-        checkedAt = document.checkedAt
-        reloadLog()
     }
 
     private func runScript(name: String, arguments: [String], busy: String) async {
-        guard rootIsValid else {
+        guard let root = validatedRoot else {
             actionError = "Choose the Prushka checkout in Settings."
             return
         }
         guard !busyIDs.contains(busy) else { return }
+
+        let scriptURL: URL
+        switch Safety.scriptURL(named: name, root: root) {
+        case .failure(let error):
+            actionError = error.localizedDescription
+            return
+        case .success(let url):
+            scriptURL = url
+        }
+
+        let safeArgs: [String]
+        switch Safety.validateScriptArguments(arguments) {
+        case .failure(let error):
+            actionError = error.localizedDescription
+            return
+        case .success(let args):
+            safeArgs = args
+        }
+
         busyIDs.insert(busy)
         actionError = nil
-        let script = URL(fileURLWithPath: repoRoot).appendingPathComponent("scripts/\(name)").path
         let output = await ProcessRunner.run(
-            arguments: ["/bin/bash", script] + arguments,
-            cwd: URL(fileURLWithPath: repoRoot),
+            arguments: ["/bin/bash", scriptURL.path] + safeArgs,
+            cwd: root,
             extraPath: loginPath
         )
         busyIDs.remove(busy)
@@ -272,16 +367,17 @@ public final class LauncherModel {
     }
 
     private func reloadLog() {
-        logText = LogTail.read(path: logPath(for: selectedLogID))
-    }
-
-    private func logPath(for id: String) -> String {
-        if let file = unit(id: id)?.logFile, !file.isEmpty {
-            return file
+        guard let root = validatedRoot else {
+            logText = ""
+            return
         }
-        return URL(fileURLWithPath: repoRoot)
-            .appendingPathComponent(".run/logs/\(id).log")
-            .path
+        let preferred = unit(id: selectedLogID)?.logFile
+        switch Safety.logFileURL(unitID: selectedLogID, root: root, preferred: preferred) {
+        case .success(let url):
+            logText = LogTail.read(path: url.path)
+        case .failure:
+            logText = ""
+        }
     }
 
     private func startPolling() {
@@ -318,6 +414,19 @@ public final class LauncherModel {
             return nil
         }
         return try? decoder.decode(StatusDocument.self, from: Data(raw[start...end].utf8))
+    }
+}
+
+enum Confirm {
+    @MainActor
+    static func ask(title: String, message: String, confirm: String, style: NSAlert.Style) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = style
+        alert.addButton(withTitle: confirm)
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 }
 

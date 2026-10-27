@@ -30,6 +30,12 @@ struct RegistryFile: Decodable, Sendable, Equatable {
     let version: Int
     let units: [RegistryUnit]
     let tools: [RegistryTool]
+
+    init(version: Int, units: [RegistryUnit], tools: [RegistryTool]) {
+        self.version = version
+        self.units = units
+        self.tools = tools
+    }
 }
 
 struct RegistryUnit: Decodable, Identifiable, Sendable, Equatable {
