@@ -1,0 +1,102 @@
+import AppKit
+import SwiftUI
+
+struct SettingsView: View {
+    @Environment(LauncherModel.self) private var model
+    @Environment(\.colorScheme) private var scheme
+    @State private var pathDraft = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionLabel("Checkout")
+                GroupedCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        TextField("Repository path", text: $pathDraft)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 14, design: .monospaced))
+                            .padding(8)
+                            .background {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(LauncherTheme.field(scheme))
+                            }
+                            .onSubmit { model.setRepoRoot(pathDraft) }
+
+                        HStack(spacing: 10) {
+                            Button("Save") { model.setRepoRoot(pathDraft) }
+                                .buttonStyle(PressStyle())
+                            Button("Choose…") { chooseFolder() }
+                                .buttonStyle(PressStyle())
+                            Button("Use detected") { model.useDetectedRoot() }
+                                .buttonStyle(PressStyle())
+                            Spacer(minLength: 0)
+                            Text(model.rootIsValid ? "Registry found" : "Registry missing")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(model.rootIsValid ? Color.green : Color.orange)
+                        }
+                    }
+                    .padding(14)
+                }
+                Text(detectedCaption)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                SectionLabel("Launcher")
+                GroupedCard {
+                    row("Poll", value: "Every 2 seconds")
+                    CardDivider()
+                    row("Discovery", value: "Port and process, not only this app")
+                    CardDivider()
+                    row("Sandbox", value: "Off")
+                }
+                Text("Services, tools, and logs all read this checkout. Changing it does not move the app.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+            }
+        }
+        .onAppear { pathDraft = model.repoRoot }
+        .onChange(of: model.repoRoot) { _, newValue in
+            pathDraft = newValue
+        }
+    }
+
+    private var detectedCaption: String {
+        if model.detectedRoot.isEmpty {
+            return "Scripts live in scripts/ at the repository root."
+        }
+        return "Detected \(model.detectedRoot)"
+    }
+
+    private func row(_ title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 15, weight: .medium))
+            Spacer(minLength: 12)
+            Text(value)
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Select the Prushka repository root"
+        if !model.repoRoot.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: model.repoRoot)
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        pathDraft = url.path
+        model.setRepoRoot(url.path)
+    }
+}
