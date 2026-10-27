@@ -1,8 +1,10 @@
 # Prushka L
 
+Part of [`prushka-tools`](../README.md) — the shared tooling tree that usually sits at `prushka/tools`.
+
 Local macOS control center for a [Prushka](https://github.com/AlcorBBX) checkout: start/stop web, desktop, mobile, API and stems workers, run tab-source demo tools, and tail logs — without typing the same shell commands every day.
 
-This repository is **only the launcher**. It does not contain the Prushka monorepo. Point Settings at a checkout that has:
+This package is **only the launcher**. It does not contain the Prushka monorepo. Point Settings at a checkout that has:
 
 - `scripts/registry.json`
 - `scripts/up.sh`, `scripts/down.sh`, `scripts/status.sh`
