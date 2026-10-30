@@ -55,6 +55,9 @@ enum Safety {
         case agentFailed(String)
         case lazygitFailed(String)
         case gitFailed(String)
+        case badCommitMessage(String)
+        case missingLauncherSources
+        case rebuildFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -98,7 +101,59 @@ enum Safety {
                 "Could not open lazygit: \(detail)"
             case .gitFailed(let detail):
                 "git failed: \(detail)"
+            case .badCommitMessage(let detail):
+                "Invalid commit message: \(detail)"
+            case .missingLauncherSources:
+                "Launcher sources missing (need tools/macos-dev-launcher/Package.swift and Scripts/package-app.sh)."
+            case .rebuildFailed(let detail):
+                "Rebuild failed: \(detail)"
             }
+        }
+    }
+
+    /// Message for `git commit -F`; rejects empty / oversized / control-laden text.
+    static func sanitizeCommitMessage(_ raw: String) -> Result<String, Failure> {
+        let message = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty else {
+            return .failure(.badCommitMessage("empty"))
+        }
+        guard message.count <= 8_000 else {
+            return .failure(.badCommitMessage("too long (max 8000 characters)"))
+        }
+        if message.contains("\0") {
+            return .failure(.badCommitMessage("contains NUL"))
+        }
+        return .success(message)
+    }
+
+    /// Resolves `tools/macos-dev-launcher` + allowlisted `Scripts/package-app.sh` under the checkout.
+    static func launcherPackageScript(root: URL) -> Result<(script: URL, cwd: URL, app: URL), Failure> {
+        switch containedDirectory(relative: "tools/macos-dev-launcher", root: root) {
+        case .failure(let error):
+            return .failure(error)
+        case .success(let launcherRoot):
+            let package = launcherRoot.appendingPathComponent("Package.swift")
+            let script = launcherRoot
+                .appendingPathComponent("Scripts")
+                .appendingPathComponent("package-app.sh")
+                .standardizedFileURL
+            let scriptsDir = launcherRoot.appendingPathComponent("Scripts").standardizedFileURL
+            guard FileManager.default.fileExists(atPath: package.path),
+                  FileManager.default.fileExists(atPath: script.path)
+            else {
+                return .failure(.missingLauncherSources)
+            }
+            let resolved = script.resolvingSymlinksInPath()
+            let scriptsResolved = scriptsDir.resolvingSymlinksInPath()
+            guard resolved.path.hasPrefix(scriptsResolved.path + "/")
+                || resolved.path == scriptsResolved.appendingPathComponent("package-app.sh").path
+            else {
+                return .failure(.scriptEscape)
+            }
+            let app = launcherRoot
+                .appendingPathComponent("dist")
+                .appendingPathComponent("Prushka L.app")
+            return .success((script, launcherRoot, app))
         }
     }
 

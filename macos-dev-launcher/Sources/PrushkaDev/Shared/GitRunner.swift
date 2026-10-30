@@ -9,6 +9,7 @@ enum GitRunner {
         case unstage(paths: [String])
         case cachedDiff
         case shortLog
+        case commit(message: String)
     }
 
     static func run(
@@ -25,8 +26,15 @@ enum GitRunner {
             cwd = url
         }
 
+        var messageFileURL: URL?
+        defer {
+            if let messageFileURL {
+                try? FileManager.default.removeItem(at: messageFileURL)
+            }
+        }
+
         let arguments: [String]
-        switch buildArguments(action) {
+        switch buildArguments(action, messageFileURL: &messageFileURL) {
         case .failure(let error):
             return .failure(error)
         case .success(let args):
@@ -37,12 +45,15 @@ enum GitRunner {
             arguments: arguments,
             cwd: cwd,
             extraPath: extraPath,
-            timeout: .seconds(60)
+            timeout: .seconds(120)
         )
         return .success(output)
     }
 
-    private static func buildArguments(_ action: Action) -> Result<[String], Safety.Failure> {
+    private static func buildArguments(
+        _ action: Action,
+        messageFileURL: inout URL?
+    ) -> Result<[String], Safety.Failure> {
         switch action {
         case .status:
             return .success(["git", "status", "--porcelain=v1", "-b"])
@@ -67,7 +78,23 @@ enum GitRunner {
         case .cachedDiff:
             return .success(["git", "diff", "--cached", "--no-color"])
         case .shortLog:
-            return .success(["git", "log", "-5", "--oneline", "--no-color"])
+            return .success(["git", "log", "-8", "--format=%s%n%b%n---", "--no-color"])
+        case .commit(let message):
+            switch Safety.sanitizeCommitMessage(message) {
+            case .failure(let error):
+                return .failure(error)
+            case .success(let safeMessage):
+                let url = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("prushka-l-commit-\(UUID().uuidString).txt")
+                do {
+                    try Data(safeMessage.utf8).write(to: url, options: .atomic)
+                } catch {
+                    return .failure(.gitFailed("Could not write commit message file."))
+                }
+                messageFileURL = url
+                // -F keeps multiline bodies; hooks still run (no --no-verify).
+                return .success(["git", "commit", "-F", url.path])
+            }
         }
     }
 }

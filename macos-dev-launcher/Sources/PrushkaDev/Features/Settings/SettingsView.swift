@@ -8,6 +8,10 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
+            if let actionError = model.actionError {
+                ErrorBanner(message: actionError)
+            }
+
             VStack(alignment: .leading, spacing: 8) {
                 SectionLabel("Checkout")
                 GroupedCard {
@@ -57,10 +61,74 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
             }
+
+            rebuildSection
         }
         .onAppear { pathDraft = model.repoRoot }
         .onChange(of: model.repoRoot) { _, newValue in
             pathDraft = newValue
+        }
+    }
+
+    private var rebuildSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel("Update")
+            GroupedCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Rebuild this app from tools/macos-dev-launcher (debug), then open a new instance and quit this one.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 10) {
+                        if model.isRebuilding {
+                            Button("Cancel") { model.cancelRebuild() }
+                                .buttonStyle(PressStyle())
+                                .foregroundStyle(.red)
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Building…")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Button {
+                                Task { await model.rebuildAndRelaunch() }
+                            } label: {
+                                Text("Rebuild & Relaunch")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 7)
+                                    .background(Capsule(style: .continuous).fill(LauncherTheme.tint(.settings)))
+                            }
+                            .buttonStyle(PressStyle())
+                            .disabled(!model.rootIsValid)
+                        }
+                        Spacer(minLength: 0)
+                    }
+
+                    if !model.rebuildLog.isEmpty {
+                        ScrollView {
+                            Text(model.rebuildLog)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        }
+                        .frame(minHeight: 120, maxHeight: 220)
+                        .padding(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(LauncherTheme.field(scheme))
+                        )
+                    }
+                }
+                .padding(14)
+            }
+            Text("Needs swift on your login PATH. Same as ./Scripts/package-app.sh in the launcher tree.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
         }
     }
 

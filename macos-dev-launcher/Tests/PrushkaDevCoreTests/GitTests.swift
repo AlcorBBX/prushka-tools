@@ -78,6 +78,23 @@ final class GitTests: XCTestCase {
         XCTAssertFalse(cleaned.contains("```"))
     }
 
+    func testSanitizeCommitMessage() {
+        XCTAssertThrowsErrorish(Safety.sanitizeCommitMessage("   "))
+        XCTAssertThrowsErrorish(Safety.sanitizeCommitMessage("bad\0null"))
+        XCTAssertNoThrowish(Safety.sanitizeCommitMessage("feat(GitView): Add commit button"))
+    }
+
+    func testPromptRequiresScope() {
+        let prompt = CommitMessageGenerator.buildPrompt(
+            repoLabel: "tools",
+            statusText: "M Sources/Foo.swift",
+            cachedDiff: "diff --git a/Sources/Foo.swift",
+            shortLog: "feat(ProcessRunner): Enhance PATH"
+        )
+        XCTAssertTrue(prompt.contains("ALWAYS include a scope"))
+        XCTAssertTrue(prompt.contains("feat(ProcessRunner):"))
+    }
+
     private func XCTAssertNoThrowish<T>(
         _ result: Result<T, Safety.Failure>,
         file: StaticString = #filePath,

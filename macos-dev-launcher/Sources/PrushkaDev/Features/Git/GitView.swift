@@ -190,7 +190,7 @@ struct GitView: View {
             SectionLabel("Commit message")
             GroupedCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Generates a draft via Cursor agent CLI from staged changes. Commit itself happens in lazygit.")
+                    Text("Draft via Cursor agent from staged changes (Conventional Commits with scope). Commit uses the text below.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -219,6 +219,26 @@ struct GitView: View {
                         .buttonStyle(PressStyle())
                         .disabled(model.gitBusy || model.gitGenerating)
 
+                        Button {
+                            Task { await model.commitWithDraft() }
+                        } label: {
+                            Text("Commit")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 7)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(Color(red: 0.20, green: 0.72, blue: 0.48))
+                                )
+                        }
+                        .buttonStyle(PressStyle())
+                        .disabled(
+                            model.gitBusy
+                                || model.gitGenerating
+                                || model.commitMessageDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        )
+
                         if model.gitGenerating {
                             ProgressView()
                                 .controlSize(.small)
@@ -235,7 +255,7 @@ struct GitView: View {
                 }
                 .padding(14)
             }
-            Text("Prushka L does not run git commit. Copy the message, then commit in lazygit.")
+            Text("Commit runs git commit -F on staged files only (hooks still run). Use lazygit for the rest.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)

@@ -36,12 +36,17 @@ public final class LauncherModel {
     var gitGenerating = false
     var gitStatusError: String?
 
+    // MARK: Self-rebuild
+    var isRebuilding = false
+    var rebuildLog = ""
+
     private var didBoot = false
     private var loginPath = ""
     private var pollTask: Task<Void, Never>?
     private var serviceLogPollTask: Task<Void, Never>?
     private var statusChain: Task<Void, Never>?
     private var activeProcess: ManagedProcess?
+    private var rebuildProcess: ManagedProcess?
 
     var rootIsValid: Bool {
         RepoRoot.isRepo(repoRoot)
@@ -540,6 +545,49 @@ public final class LauncherModel {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
+    func commitWithDraft() async {
+        guard let root = validatedRoot, let repo = selectedGitRepo else {
+            actionError = "Choose the Prushka checkout in Settings."
+            return
+        }
+        let message = commitMessageDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty else {
+            actionError = "Generate or type a commit message first."
+            return
+        }
+        let ok = Confirm.ask(
+            title: "Create commit?",
+            message: "Commits staged changes in \(repo.label)/ with the message in the editor. Git hooks still run.",
+            confirm: "Commit",
+            style: .informational
+        )
+        guard ok else { return }
+
+        guard !gitBusy else { return }
+        gitBusy = true
+        actionError = nil
+        defer { gitBusy = false }
+
+        switch await GitRunner.run(
+            action: .commit(message: message),
+            repo: repo,
+            root: root,
+            extraPath: loginPath
+        ) {
+        case .failure(let error):
+            actionError = error.localizedDescription
+        case .success(let output):
+            if output.code != 0 {
+                actionError = output.combined.isEmpty
+                    ? Safety.Failure.gitFailed("exit \(output.code)").localizedDescription
+                    : Safety.Failure.gitFailed(Self.clip(output.combined, fallback: "exit \(output.code)")).localizedDescription
+            } else {
+                commitMessageDraft = ""
+            }
+        }
+        await refreshGitStatusUnlocked(root: root, repo: repo)
+    }
+
     func openLazygit() {
         guard let root = validatedRoot, let repo = selectedGitRepo else {
             actionError = "Choose the Prushka checkout in Settings."
@@ -550,6 +598,92 @@ public final class LauncherModel {
             actionError = error.localizedDescription
         case .success:
             actionError = nil
+        }
+    }
+
+    // MARK: - Self-rebuild
+
+    func rebuildAndRelaunch() async {
+        guard let root = validatedRoot else {
+            actionError = "Choose the Prushka checkout in Settings."
+            return
+        }
+        guard !isRebuilding else { return }
+
+        let prepared: (script: URL, cwd: URL, app: URL)
+        switch Safety.launcherPackageScript(root: root) {
+        case .failure(let error):
+            actionError = error.localizedDescription
+            return
+        case .success(let value):
+            prepared = value
+        }
+
+        isRebuilding = true
+        actionError = nil
+        rebuildLog = "Rebuilding Prushka L…\n"
+        defer {
+            isRebuilding = false
+            rebuildProcess = nil
+        }
+
+        let output = await ProcessRunner.run(
+            arguments: ["/bin/bash", prepared.script.path],
+            cwd: prepared.cwd,
+            extraPath: loginPath,
+            timeout: .seconds(600),
+            coalesce: .milliseconds(100),
+            onChunk: { [weak self] chunk in
+                Task { @MainActor in
+                    self?.appendRebuildLog(chunk)
+                }
+            },
+            onStart: { [weak self] process in
+                Task { @MainActor in
+                    self?.rebuildProcess = process
+                }
+            }
+        )
+
+        if output.cancelled {
+            appendRebuildLog("\nCancelled.\n")
+            return
+        }
+        if output.code != 0 {
+            if rebuildLog.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                appendRebuildLog(output.combined)
+            }
+            actionError = Safety.Failure.rebuildFailed(
+                output.combined.isEmpty ? "exit \(output.code)" : Self.clip(output.combined, fallback: "exit \(output.code)")
+            ).localizedDescription
+            return
+        }
+
+        appendRebuildLog("\nOpening new instance…\n")
+        do {
+            let config = NSWorkspace.OpenConfiguration()
+            config.createsNewApplicationInstance = true
+            try await NSWorkspace.shared.openApplication(at: prepared.app, configuration: config)
+        } catch {
+            actionError = Safety.Failure.rebuildFailed(
+                "Built OK, but could not open \(prepared.app.path): \(error.localizedDescription)"
+            ).localizedDescription
+            return
+        }
+
+        // Give the new instance a moment to start, then quit this process.
+        try? await Task.sleep(for: .milliseconds(400))
+        NSApp.terminate(nil)
+    }
+
+    func cancelRebuild() {
+        rebuildProcess?.terminate()
+    }
+
+    private func appendRebuildLog(_ chunk: String) {
+        rebuildLog += chunk
+        if rebuildLog.count > 200_000 {
+            rebuildLog.removeFirst(rebuildLog.count - 160_000)
         }
     }
 

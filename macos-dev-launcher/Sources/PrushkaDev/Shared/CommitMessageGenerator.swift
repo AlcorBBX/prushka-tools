@@ -3,7 +3,7 @@ import Foundation
 enum CommitMessageGenerator {
     static let maxDiffChars = 48_000
     static let maxStatusChars = 8_000
-    static let maxLogChars = 2_000
+    static let maxLogChars = 4_000
 
     static func generate(
         repo: NestedGitRepo,
@@ -36,9 +36,11 @@ enum CommitMessageGenerator {
         )
 
         // Ask mode is read-only: no git commit / write tools.
+        // --trust skips the interactive workspace-trust prompt required in -p mode.
         let arguments = [
             "agent",
             "-p",
+            "--trust",
             "--mode", "ask",
             "--output-format", "text",
             prompt
@@ -74,7 +76,19 @@ enum CommitMessageGenerator {
     ) -> String {
         """
         You are writing a git commit message for the nested repo "\(repoLabel)" in a Prushka checkout.
-        Use Conventional Commits style when it fits. Prefer the repository's recent commit tone from the log.
+
+        Required format — Conventional Commits WITH a scope in parentheses:
+          type(scope): Subject line in sentence case or imperative mood
+
+        Then a blank line, then a short body as "-" bullets when there is more than one notable change.
+
+        Scope rules:
+        - ALWAYS include a scope when staged paths imply a module, type, feature, or folder (e.g. ProcessRunner, GitView, Safety, package-app).
+        - Prefer the primary Swift type / file stem / feature name from the staged diff, not the repo name "\(repoLabel)".
+        - If several areas change, pick the dominant one; do not omit the scope.
+        - Example header: feat(ProcessRunner): Enhance PATH handling for GUI applications
+
+        Match the tone of recent commits in the log (header + bullets when that style appears).
         Output ONLY the commit message text. No markdown fences, no quotes, no explanation, no trailing commentary.
         If there are no staged changes, say so in one short sentence.
 

@@ -31,14 +31,16 @@ Release binary:
 ./Scripts/package-app.sh --release
 ```
 
-The package script builds with SwiftPM, wraps the binary as `Prushka L.app`, copies `Resources/AppIcon.icns`, and ad-hoc codesigns. **App Sandbox is off** on purpose so the app can run your repo scripts.
+The package script builds with SwiftPM, wraps the binary as `Prushka L.app` **in place** (safe while the app is running), copies `Resources/AppIcon.icns`, and ad-hoc codesigns. **App Sandbox is off** on purpose so the app can run your repo scripts.
+
+From a running app: **Settings → Rebuild & Relaunch** runs the same script, streams the log, opens a new instance, and quits the old one.
 
 ## Usage
 
 1. Open **Prushka L**.
-2. In **Settings**, choose the Prushka repository root (or use the detected path).
+2. In **Settings**, choose the Prushka repository root (or use the detected path). Use **Rebuild & Relaunch** there after editing the launcher sources.
 3. **Services** — start/stop units, open local URLs, jump to logs.
-4. **Git** — pick nested repo (`front` / `tools` / `scripts`), stage all or selected paths, generate a commit message with `agent -p` (copy only; no `git commit` from L), open lazygit in Terminal.app.
+4. **Git** — pick nested repo (`front` / `tools` / `scripts`), stage all or selected paths, generate a scoped Conventional Commit message with `agent -p`, commit staged changes, or open lazygit in Terminal.app.
 5. **Tools** — tab-source fetch / fill / notes-from-lead with forms.
 6. **Logs** — tail `.run/logs/<unit>.log` for launcher-started processes.
 

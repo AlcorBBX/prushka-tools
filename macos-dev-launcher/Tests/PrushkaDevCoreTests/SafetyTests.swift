@@ -37,6 +37,23 @@ final class SafetyTests: XCTestCase {
         XCTAssertThrowsErrorish(Safety.validateRepo(root.path))
     }
 
+    func testLauncherPackageScriptRequiresSources() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("prushka-rebuild-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        XCTAssertThrowsErrorish(Safety.launcherPackageScript(root: root))
+
+        let launcher = root
+            .appendingPathComponent("tools")
+            .appendingPathComponent("macos-dev-launcher")
+        let scripts = launcher.appendingPathComponent("Scripts")
+        try FileManager.default.createDirectory(at: scripts, withIntermediateDirectories: true)
+        try Data("//").write(to: launcher.appendingPathComponent("Package.swift"))
+        try Data("#!/bin/bash\n").write(to: scripts.appendingPathComponent("package-app.sh"))
+        XCTAssertNoThrowish(Safety.launcherPackageScript(root: root))
+    }
+
     private func XCTAssertNoThrowish<T>(_ result: Result<T, Safety.Failure>, file: StaticString = #filePath, line: UInt = #line) {
         if case .failure(let error) = result {
             XCTFail("unexpected failure: \(error)", file: file, line: line)
