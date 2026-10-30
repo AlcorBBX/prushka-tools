@@ -32,6 +32,8 @@ enum Safety {
         "--bg", "--json"
     ]).union(knownUnitIDs)
 
+    static let knownGitRepoIDs: Set<String> = Set(GitCatalog.repos.map(\.id))
+
     enum Failure: LocalizedError {
         case invalidRepo
         case unknownScript(String)
@@ -46,6 +48,13 @@ enum Safety {
         case cwdEscape
         case logEscape
         case badURL
+        case unknownGitRepo(String)
+        case missingGitRepo(String)
+        case badGitPath(String)
+        case missingBinary(String, hint: String)
+        case agentFailed(String)
+        case lazygitFailed(String)
+        case gitFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -75,8 +84,145 @@ enum Safety {
                 "Log path is outside .run/logs."
             case .badURL:
                 "Open is limited to local http(s) URLs."
+            case .unknownGitRepo(let id):
+                "Unknown git repo: \(id)"
+            case .missingGitRepo(let id):
+                "No .git under \(id)/ — skip or clone that nested repo."
+            case .badGitPath(let path):
+                "Refused git path: \(path)"
+            case .missingBinary(let name, let hint):
+                "\(name) not found on PATH. \(hint)"
+            case .agentFailed(let detail):
+                "Commit message generation failed: \(detail)"
+            case .lazygitFailed(let detail):
+                "Could not open lazygit: \(detail)"
+            case .gitFailed(let detail):
+                "git failed: \(detail)"
             }
         }
+    }
+
+    /// Resolves a known nested git repo under the Prushka checkout.
+    static func gitRepoURL(repo: NestedGitRepo, root: URL) -> Result<URL, Failure> {
+        guard knownGitRepoIDs.contains(repo.id),
+              let canonical = GitCatalog.repo(id: repo.id),
+              canonical == repo
+        else {
+            return .failure(.unknownGitRepo(repo.id))
+        }
+        switch containedDirectory(relative: repo.relativePath, root: root) {
+        case .failure(let error):
+            return .failure(error)
+        case .success(let cwd):
+            let gitDir = cwd.appendingPathComponent(".git")
+            var isDir: ObjCBool = false
+            let exists = FileManager.default.fileExists(atPath: gitDir.path, isDirectory: &isDir)
+            // .git can be a directory or a file (worktree / submodule pointer).
+            guard exists else {
+                return .failure(.missingGitRepo(repo.relativePath))
+            }
+            return .success(cwd)
+        }
+    }
+
+    static func gitRepoAvailable(repo: NestedGitRepo, root: URL) -> Bool {
+        if case .success = gitRepoURL(repo: repo, root: root) {
+            return true
+        }
+        return false
+    }
+
+    /// Relative paths only; no shell metacharacters or path escape.
+    static func sanitizeGitPaths(_ paths: [String]) -> Result<[String], Failure> {
+        guard !paths.isEmpty else {
+            return .failure(.badGitPath("(empty)"))
+        }
+        var result: [String] = []
+        result.reserveCapacity(paths.count)
+        for raw in paths {
+            let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !path.isEmpty, path.count <= 512 else {
+                return .failure(.badGitPath(raw))
+            }
+            guard !path.hasPrefix("/"),
+                  !path.contains(".."),
+                  !path.contains("~"),
+                  !path.contains("\0")
+            else {
+                return .failure(.badGitPath(path))
+            }
+            guard isSafeCommandToken(path) || isSafeGitPathToken(path) else {
+                return .failure(.badGitPath(path))
+            }
+            result.append(path)
+        }
+        return .success(result)
+    }
+
+    /// Like tool tokens but allows `/` in relative paths.
+    private static func isSafeGitPathToken(_ token: String) -> Bool {
+        guard !token.isEmpty, token.count <= 512 else { return false }
+        if token.contains("\0") || token.contains("\n") || token.contains("\r") { return false }
+        let banned = CharacterSet(charactersIn: ";|&$`<>\\\"'(){}[]!*?\n\r\t")
+        if token.unicodeScalars.contains(where: { banned.contains($0) }) { return false }
+        if token.contains("..") { return false }
+        return true
+    }
+
+    static func requireBinaryOnPath(_ name: String, extraPath: String?) -> Result<String, Failure> {
+        let allowed = Set(["git", "agent", "lazygit"])
+        guard allowed.contains(name) else {
+            return .failure(.badToolBinary(name))
+        }
+        if let resolved = which(name, extraPath: extraPath) {
+            return .success(resolved)
+        }
+        let hint: String
+        switch name {
+        case "agent":
+            hint = "Install Cursor CLI (https://cursor.com/install) and ensure agent is on your login PATH."
+        case "lazygit":
+            hint = "Install with: brew install lazygit"
+        case "git":
+            hint = "Install Xcode Command Line Tools or Homebrew git."
+        default:
+            hint = ""
+        }
+        return .failure(.missingBinary(name, hint: hint))
+    }
+
+    static func which(_ name: String, extraPath: String?) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["which", name]
+        var env = ProcessInfo.processInfo.environment
+        if let extraPath, !extraPath.isEmpty {
+            if let existing = env["PATH"], !existing.isEmpty {
+                env["PATH"] = extraPath + ":" + existing
+            } else {
+                env["PATH"] = extraPath
+            }
+        }
+        process.environment = env
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+        guard process.terminationStatus == 0 else { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        let line = String(decoding: data, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: \.isNewline)
+            .first
+            .map(String.init)
+        guard let line, line.contains("/") else { return nil }
+        return line
     }
 
     static func validateRepo(_ path: String) -> Result<URL, Failure> {

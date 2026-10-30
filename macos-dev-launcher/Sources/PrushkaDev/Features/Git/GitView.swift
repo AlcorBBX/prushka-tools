@@ -1,0 +1,291 @@
+import SwiftUI
+
+struct GitView: View {
+    @Environment(LauncherModel.self) private var model
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            if let actionError = model.actionError {
+                ErrorBanner(message: actionError)
+            }
+            if !model.rootIsValid {
+                GroupedCard {
+                    Text("Point Settings at the Prushka checkout. Git works on nested repos front/, tools/, and scripts/.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .padding(14)
+                }
+            } else {
+                repoPicker
+                statusCard
+                messageCard
+                lazygitCard
+            }
+        }
+        .onAppear {
+            Task { await model.refreshGitStatus() }
+        }
+        .onChange(of: model.repoRoot) { _, _ in
+            Task { await model.refreshGitStatus() }
+        }
+    }
+
+    private var repoPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel("Repository")
+            GroupedCard {
+                HStack(spacing: 8) {
+                    ForEach(GitCatalog.repos) { repo in
+                        let available = model.gitRepoIsAvailable(repo)
+                        let selected = model.selectedGitRepoID == repo.id
+                        Button {
+                            model.selectGitRepo(repo.id)
+                        } label: {
+                            Text(repo.label)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(selected ? .white : (available ? .primary : .secondary))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background {
+                                    Capsule(style: .continuous)
+                                        .fill(
+                                            selected
+                                                ? LauncherTheme.tint(.git)
+                                                : Color.primary.opacity(available ? 0.06 : 0.03)
+                                        )
+                                }
+                        }
+                        .buttonStyle(PressStyle())
+                        .disabled(!available)
+                        .opacity(available ? 1 : 0.45)
+                        .help(available ? repo.relativePath : "No .git under \(repo.relativePath)/")
+                    }
+                    Spacer(minLength: 0)
+                    if model.gitBusy {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+                .padding(14)
+            }
+        }
+    }
+
+    private var statusCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                SectionLabel("Status")
+                Spacer(minLength: 0)
+                if !model.gitBranch.isEmpty {
+                    Text(model.gitBranch)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule(style: .continuous).fill(Color.primary.opacity(0.06)))
+                }
+            }
+            if let gitStatusError = model.gitStatusError {
+                ErrorBanner(message: gitStatusError)
+            }
+            GroupedCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    actionsRow
+                    if model.gitEntries.isEmpty {
+                        Text(model.gitStatusError == nil ? "Working tree clean." : " ")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 4)
+                    } else {
+                        fileList
+                    }
+                }
+                .padding(14)
+            }
+        }
+    }
+
+    private var actionsRow: some View {
+        HStack(spacing: 8) {
+            gitButton("Refresh") {
+                Task { await model.refreshGitStatus() }
+            }
+            gitButton("Stage selected") {
+                Task { await model.stageGit(all: false) }
+            }
+            .disabled(model.gitSelectedPaths.isEmpty || model.gitBusy)
+            gitButton("Stage all") {
+                Task { await model.stageGit(all: true) }
+            }
+            .disabled(model.gitBusy || model.gitEntries.isEmpty)
+            gitButton("Unstage selected") {
+                Task { await model.unstageGit(all: false) }
+            }
+            .disabled(model.gitSelectedPaths.isEmpty || model.gitBusy)
+            gitButton("Unstage all") {
+                Task { await model.unstageGit(all: true) }
+            }
+            .disabled(model.gitBusy || model.gitEntries.isEmpty)
+            Spacer(minLength: 0)
+            if !model.gitEntries.isEmpty {
+                Button(model.gitSelectedPaths.count == model.gitEntries.count ? "Clear" : "Select all") {
+                    if model.gitSelectedPaths.count == model.gitEntries.count {
+                        model.clearGitPathSelection()
+                    } else {
+                        model.selectAllGitPaths()
+                    }
+                }
+                .buttonStyle(PressStyle())
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var fileList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(model.gitEntries.enumerated()), id: \.element.id) { index, entry in
+                if index > 0 {
+                    CardDivider()
+                }
+                Button {
+                    model.toggleGitPath(entry.path)
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: model.gitSelectedPaths.contains(entry.path) ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(
+                                model.gitSelectedPaths.contains(entry.path)
+                                    ? LauncherTheme.tint(.git)
+                                    : Color.secondary
+                            )
+                        Text(entry.codeLabel)
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, alignment: .leading)
+                        Text(entry.path)
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 0)
+                        Text(entry.statusLabel)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .pointingHandCursor()
+            }
+        }
+    }
+
+    private var messageCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel("Commit message")
+            GroupedCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Generates a draft via Cursor agent CLI from staged changes. Commit itself happens in lazygit.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    TextEditor(text: Bindable(model).commitMessageDraft)
+                        .font(.system(size: 13, design: .monospaced))
+                        .frame(minHeight: 110, maxHeight: 200)
+                        .scrollContentBackground(.hidden)
+                        .padding(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(LauncherTheme.field(scheme))
+                        )
+
+                    HStack(spacing: 10) {
+                        Button {
+                            Task { await model.generateCommitMessage() }
+                        } label: {
+                            Text(model.gitGenerating ? "Generating…" : "Generate")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 7)
+                                .background(Capsule(style: .continuous).fill(LauncherTheme.tint(.git)))
+                        }
+                        .buttonStyle(PressStyle())
+                        .disabled(model.gitBusy || model.gitGenerating)
+
+                        if model.gitGenerating {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+
+                        Button("Copy") {
+                            model.copyCommitMessage()
+                        }
+                        .buttonStyle(PressStyle())
+                        .disabled(model.commitMessageDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        Spacer(minLength: 0)
+                    }
+                }
+                .padding(14)
+            }
+            Text("Prushka L does not run git commit. Copy the message, then commit in lazygit.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    private var lazygitCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel("lazygit")
+            GroupedCard {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Open lazygit in Terminal.app for the selected repo.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Text("Diff, commit, push, branches — outside this launcher.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Button {
+                        model.openLazygit()
+                    } label: {
+                        Text("Open lazygit")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 7)
+                            .background(Capsule(style: .continuous).fill(LauncherTheme.tint(.git)))
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(model.selectedGitRepo.map { !model.gitRepoIsAvailable($0) } ?? true)
+                }
+                .padding(14)
+            }
+        }
+    }
+
+    private func gitButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.primary.opacity(0.06))
+                )
+        }
+        .buttonStyle(PressStyle())
+        .disabled(model.gitBusy)
+    }
+}

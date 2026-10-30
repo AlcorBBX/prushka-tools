@@ -227,9 +227,10 @@ struct SidebarColumn: View {
         switch section {
         case .services: "1"
         case .checks: "2"
-        case .tools: "3"
-        case .logs: "4"
-        case .settings: "5"
+        case .git: "3"
+        case .tools: "4"
+        case .logs: "5"
+        case .settings: "6"
         }
     }
 }

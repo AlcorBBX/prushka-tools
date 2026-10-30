@@ -45,6 +45,7 @@ enum LauncherTheme {
         switch section {
         case .services: Color(red: 0.22, green: 0.48, blue: 0.98)
         case .checks: Color(red: 0.20, green: 0.72, blue: 0.48)
+        case .git: Color(red: 0.93, green: 0.55, blue: 0.28)
         case .tools: Color(red: 0.58, green: 0.34, blue: 0.96)
         case .logs: Color(red: 0.16, green: 0.70, blue: 0.78)
         case .settings: Color(red: 0.94, green: 0.38, blue: 0.30)

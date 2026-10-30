@@ -67,6 +67,8 @@ public struct RootView: View {
             ServicesView()
         case .checks:
             ChecksView()
+        case .git:
+            GitView()
         case .tools:
             ToolsView()
         case .logs:

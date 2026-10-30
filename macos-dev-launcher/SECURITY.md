@@ -18,6 +18,8 @@ If you do not trust the checkout (or its `scripts/`), do not point the launcher 
 - **Open** only accepts `http(s)://localhost` or `127.0.0.1`.
 - Log reads are limited to `.run/logs`.
 - Destructive stops ask for confirmation where it matters (stop all / external).
+- **Git** is limited to nested repos `front` / `tools` / `scripts` that contain `.git`. Only allowlisted `git` argv (`status`, `add`, `restore --staged`, `diff --cached`, `log`); path args are relative and escape-checked. Commit/push are not invoked from the launcher.
+- **Commit message** generation calls Cursor `agent -p --mode ask` (read-only) with a fixed prompt; `--force` is not used. `lazygit` is opened via Terminal.app `osascript`, not an embedded PTY.
 
 ## Not included
 

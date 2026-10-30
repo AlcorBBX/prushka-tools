@@ -26,6 +26,16 @@ public final class LauncherModel {
     var expandedServiceFamilyID: String?
     var serviceLogs: [String: ServiceLogState] = [:]
 
+    // MARK: Git
+    var selectedGitRepoID = "front"
+    var gitBranch = ""
+    var gitEntries: [GitFileEntry] = []
+    var gitSelectedPaths: Set<String> = []
+    var commitMessageDraft = ""
+    var gitBusy = false
+    var gitGenerating = false
+    var gitStatusError: String?
+
     private var didBoot = false
     private var loginPath = ""
     private var pollTask: Task<Void, Never>?
@@ -50,6 +60,15 @@ public final class LauncherModel {
 
     var selectedTool: RegistryTool? {
         tools.first { $0.id == selectedToolID } ?? tools.first
+    }
+
+    var selectedGitRepo: NestedGitRepo? {
+        GitCatalog.repo(id: selectedGitRepoID) ?? GitCatalog.repos.first
+    }
+
+    func gitRepoIsAvailable(_ repo: NestedGitRepo) -> Bool {
+        guard let root = validatedRoot else { return false }
+        return Safety.gitRepoAvailable(repo: repo, root: root)
     }
 
     var checkedLabel: String {
@@ -388,6 +407,205 @@ public final class LauncherModel {
 
     func cancelQuality(_ id: String) {
         qualityRun(for: id).process?.terminate()
+    }
+
+    // MARK: - Git
+
+    func selectGitRepo(_ id: String) {
+        guard GitCatalog.repo(id: id) != nil else { return }
+        selectedGitRepoID = id
+        gitSelectedPaths = []
+        commitMessageDraft = ""
+        gitStatusError = nil
+        Task { await refreshGitStatus() }
+    }
+
+    func toggleGitPath(_ path: String) {
+        if gitSelectedPaths.contains(path) {
+            gitSelectedPaths.remove(path)
+        } else {
+            gitSelectedPaths.insert(path)
+        }
+    }
+
+    func selectAllGitPaths() {
+        gitSelectedPaths = Set(gitEntries.map(\.path))
+    }
+
+    func clearGitPathSelection() {
+        gitSelectedPaths = []
+    }
+
+    func refreshGitStatus() async {
+        guard let root = validatedRoot, let repo = selectedGitRepo else {
+            gitBranch = ""
+            gitEntries = []
+            gitStatusError = "Choose the Prushka checkout in Settings."
+            return
+        }
+        guard !gitBusy else { return }
+        gitBusy = true
+        defer { gitBusy = false }
+
+        switch await GitRunner.run(action: .status, repo: repo, root: root, extraPath: loginPath) {
+        case .failure(let error):
+            gitBranch = ""
+            gitEntries = []
+            gitStatusError = error.localizedDescription
+        case .success(let output):
+            // status exits 0 even with changes; non-zero usually means not a repo / git missing
+            if output.code != 0 {
+                gitBranch = ""
+                gitEntries = []
+                gitStatusError = output.combined.isEmpty
+                    ? Safety.Failure.gitFailed("exit \(output.code)").localizedDescription
+                    : Safety.Failure.gitFailed(Self.clip(output.combined, fallback: "exit \(output.code)")).localizedDescription
+                return
+            }
+            let snapshot = GitPorcelain.parse(output.stdout)
+            gitBranch = snapshot.branch
+            gitEntries = snapshot.entries
+            gitStatusError = nil
+            gitSelectedPaths = gitSelectedPaths.intersection(Set(snapshot.entries.map(\.path)))
+        }
+    }
+
+    func stageGit(all: Bool) async {
+        await mutateGit(all ? .stageAll : .stage(paths: Array(gitSelectedPaths)))
+    }
+
+    func unstageGit(all: Bool) async {
+        await mutateGit(all ? .unstageAll : .unstage(paths: Array(gitSelectedPaths)))
+    }
+
+    func generateCommitMessage() async {
+        guard let root = validatedRoot, let repo = selectedGitRepo else {
+            actionError = "Choose the Prushka checkout in Settings."
+            return
+        }
+        guard !gitGenerating else { return }
+        gitGenerating = true
+        actionError = nil
+        defer { gitGenerating = false }
+
+        let statusOut = await GitRunner.run(action: .status, repo: repo, root: root, extraPath: loginPath)
+        let diffOut = await GitRunner.run(action: .cachedDiff, repo: repo, root: root, extraPath: loginPath)
+        let logOut = await GitRunner.run(action: .shortLog, repo: repo, root: root, extraPath: loginPath)
+
+        let statusText: String
+        switch statusOut {
+        case .failure(let error):
+            actionError = error.localizedDescription
+            return
+        case .success(let output):
+            statusText = output.stdout
+        }
+
+        let cachedDiff: String
+        switch diffOut {
+        case .failure(let error):
+            actionError = error.localizedDescription
+            return
+        case .success(let output):
+            cachedDiff = output.stdout
+        }
+
+        let shortLog: String
+        switch logOut {
+        case .failure:
+            shortLog = ""
+        case .success(let output):
+            shortLog = output.code == 0 ? output.stdout : ""
+        }
+
+        switch await CommitMessageGenerator.generate(
+            repo: repo,
+            root: root,
+            extraPath: loginPath,
+            statusText: statusText,
+            cachedDiff: cachedDiff,
+            shortLog: shortLog
+        ) {
+        case .failure(let error):
+            actionError = error.localizedDescription
+        case .success(let message):
+            commitMessageDraft = message
+        }
+    }
+
+    func copyCommitMessage() {
+        let text = commitMessageDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    func openLazygit() {
+        guard let root = validatedRoot, let repo = selectedGitRepo else {
+            actionError = "Choose the Prushka checkout in Settings."
+            return
+        }
+        switch LazygitLauncher.open(repo: repo, root: root, extraPath: loginPath) {
+        case .failure(let error):
+            actionError = error.localizedDescription
+        case .success:
+            actionError = nil
+        }
+    }
+
+    private func mutateGit(_ action: GitRunner.Action) async {
+        guard let root = validatedRoot, let repo = selectedGitRepo else {
+            actionError = "Choose the Prushka checkout in Settings."
+            return
+        }
+        if case .stage(let paths) = action, paths.isEmpty {
+            actionError = "Select at least one file to stage."
+            return
+        }
+        if case .unstage(let paths) = action, paths.isEmpty {
+            actionError = "Select at least one file to unstage."
+            return
+        }
+        guard !gitBusy else { return }
+        gitBusy = true
+        actionError = nil
+        defer { gitBusy = false }
+
+        switch await GitRunner.run(action: action, repo: repo, root: root, extraPath: loginPath) {
+        case .failure(let error):
+            actionError = error.localizedDescription
+        case .success(let output):
+            if output.code != 0 {
+                actionError = output.combined.isEmpty
+                    ? Safety.Failure.gitFailed("exit \(output.code)").localizedDescription
+                    : Safety.Failure.gitFailed(Self.clip(output.combined, fallback: "exit \(output.code)")).localizedDescription
+            }
+        }
+        // Refresh outside busy lock via recursive call would nest; call status while still busy then clear.
+        await refreshGitStatusUnlocked(root: root, repo: repo)
+    }
+
+    private func refreshGitStatusUnlocked(root: URL, repo: NestedGitRepo) async {
+        switch await GitRunner.run(action: .status, repo: repo, root: root, extraPath: loginPath) {
+        case .failure(let error):
+            gitBranch = ""
+            gitEntries = []
+            gitStatusError = error.localizedDescription
+        case .success(let output):
+            if output.code != 0 {
+                gitBranch = ""
+                gitEntries = []
+                gitStatusError = output.combined.isEmpty
+                    ? Safety.Failure.gitFailed("exit \(output.code)").localizedDescription
+                    : Safety.Failure.gitFailed(Self.clip(output.combined, fallback: "exit \(output.code)")).localizedDescription
+                return
+            }
+            let snapshot = GitPorcelain.parse(output.stdout)
+            gitBranch = snapshot.branch
+            gitEntries = snapshot.entries
+            gitStatusError = nil
+            gitSelectedPaths = gitSelectedPaths.intersection(Set(snapshot.entries.map(\.path)))
+        }
     }
 
     private func appendToolOutput(_ chunk: String) {

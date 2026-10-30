@@ -2,7 +2,7 @@
 
 Part of [`prushka-tools`](../README.md) — the shared tooling tree that usually sits at `prushka/tools`.
 
-Local macOS control center for a [Prushka](https://github.com/AlcorBBX) checkout: start/stop web, desktop, mobile, API and stems workers, run tab-source demo tools, and tail logs — without typing the same shell commands every day.
+Local macOS control center for a [Prushka](https://github.com/AlcorBBX) checkout: start/stop web, desktop, mobile, API and stems workers, run tab-source demo tools, stage nested-repo changes, draft commit messages via Cursor `agent`, open lazygit, and tail logs — without typing the same shell commands every day.
 
 This package is **only the launcher**. It does not contain the Prushka monorepo. Point Settings at a checkout that has:
 
@@ -16,6 +16,7 @@ This package is **only the launcher**. It does not contain the Prushka monorepo.
 - Swift 6.1+ (Command Line Tools or Xcode)
 - A local Prushka workspace with the scripts above
 - Tools you already use for that workspace (`pnpm`, and optionally `bun`, `go`, Expo, etc.)
+- Optional for the **Git** section: [Cursor CLI](https://cursor.com/install) (`agent`) for commit-message drafts, and [`lazygit`](https://github.com/jesseduffield/lazygit) (`brew install lazygit`)
 
 ## Build
 
@@ -37,8 +38,9 @@ The package script builds with SwiftPM, wraps the binary as `Prushka L.app`, cop
 1. Open **Prushka L**.
 2. In **Settings**, choose the Prushka repository root (or use the detected path).
 3. **Services** — start/stop units, open local URLs, jump to logs.
-4. **Tools** — tab-source fetch / fill / notes-from-lead with forms.
-5. **Logs** — tail `.run/logs/<unit>.log` for launcher-started processes.
+4. **Git** — pick nested repo (`front` / `tools` / `scripts`), stage all or selected paths, generate a commit message with `agent -p` (copy only; no `git commit` from L), open lazygit in Terminal.app.
+5. **Tools** — tab-source fetch / fill / notes-from-lead with forms.
+6. **Logs** — tail `.run/logs/<unit>.log` for launcher-started processes.
 
 Status also discovers processes started outside the app (terminal, agents) via ports and cmdline fingerprints from `scripts/status.sh --json`.
 
