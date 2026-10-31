@@ -85,6 +85,29 @@ public final class LauncherModel {
         return Safety.gitRepoAvailable(repo: repo, root: root)
     }
 
+    /// Login-shell PATH used for `git` / `agent` / `lazygit` resolution.
+    var loginShellPath: String { loginPath }
+
+    /// Resolves lazygit binary + nested-repo cwd for the in-app PTY sheet.
+    func prepareLazygitSession() -> Result<(executable: String, cwd: URL, repo: NestedGitRepo), Safety.Failure> {
+        guard let root = validatedRoot, let repo = selectedGitRepo else {
+            return .failure(.invalidRepo)
+        }
+        let cwd: URL
+        switch Safety.gitRepoURL(repo: repo, root: root) {
+        case .failure(let error):
+            return .failure(error)
+        case .success(let url):
+            cwd = url
+        }
+        switch Safety.requireBinaryOnPath("lazygit", extraPath: loginPath) {
+        case .failure(let error):
+            return .failure(error)
+        case .success(let executable):
+            return .success((executable, cwd, repo))
+        }
+    }
+
     var checkedLabel: String {
         guard !checkedAt.isEmpty else { return "Waiting for status" }
         let formatter = ISO8601DateFormatter()
@@ -605,19 +628,6 @@ public final class LauncherModel {
             }
         }
         await refreshGitStatusUnlocked(root: root, repo: repo)
-    }
-
-    func openLazygit() {
-        guard let root = validatedRoot, let repo = selectedGitRepo else {
-            actionError = "Choose the Prushka checkout in Settings."
-            return
-        }
-        switch LazygitLauncher.open(repo: repo, root: root, extraPath: loginPath) {
-        case .failure(let error):
-            actionError = error.localizedDescription
-        case .success:
-            actionError = nil
-        }
     }
 
     // MARK: - Self-rebuild

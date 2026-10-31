@@ -19,7 +19,8 @@ If you do not trust the checkout (or its `scripts/`), do not point the launcher 
 - Log reads are limited to `.run/logs`.
 - Destructive stops ask for confirmation where it matters (stop all / external).
 - **Git** is limited to nested repos `front` / `tools` / `scripts` that contain `.git`. Only allowlisted `git` argv (`status`, `add`, `restore --staged`, `diff --cached`, `log`, `commit -F` with a sanitized message file, plain `push` without `--force`). Path args are relative and escape-checked.
-- **Commit message** generation calls Cursor `agent -p --trust --mode ask` (read-only; `--trust` only skips the workspace prompt in headless mode). `--force` / `--yolo` are not used. `lazygit` is opened via Terminal.app `osascript`, not an embedded PTY.
+- **Commit message** generation calls Cursor `agent -p --trust --mode ask` (read-only; `--trust` only skips the workspace prompt in headless mode). `--force` / `--yolo` are not used.
+- **lazygit** runs in-process via SwiftTerm (`LocalProcessTerminalView` PTY) for the selected nested repo only; the binary must already be on the login PATH.
 - **Self-rebuild** runs only `tools/macos-dev-launcher/Scripts/package-app.sh` under the selected checkout (in-place `.app` update), then opens a new instance and quits.
 
 ## Not included

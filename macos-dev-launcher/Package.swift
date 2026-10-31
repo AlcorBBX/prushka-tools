@@ -10,9 +10,15 @@ let package = Package(
     products: [
         .executable(name: "PrushkaDev", targets: ["PrushkaDev"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.20.0")
+    ],
     targets: [
         .target(
             name: "PrushkaDevCore",
+            dependencies: [
+                .product(name: "SwiftTerm", package: "SwiftTerm")
+            ],
             path: "Sources/PrushkaDev"
         ),
         .executableTarget(

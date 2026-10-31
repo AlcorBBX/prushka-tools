@@ -187,7 +187,7 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .services: "Start, stop, and watch local apps"
         case .checks: "Lint, format, tests, and git hook scenarios"
-        case .git: "Stage files, draft a commit message, open lazygit"
+        case .git: "Stage files, draft a commit message, embedded lazygit"
         case .tools: "Tab source and demo scripts"
         case .logs: "Output from units started here"
         case .settings: "Checkout path for this launcher"

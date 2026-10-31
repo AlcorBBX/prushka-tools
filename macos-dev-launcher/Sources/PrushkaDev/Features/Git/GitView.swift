@@ -4,6 +4,10 @@ struct GitView: View {
     @Environment(LauncherModel.self) private var model
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showLazygit = false
+    @State private var lazygitExecutable = ""
+    @State private var lazygitCwd: URL?
+    @State private var lazygitRepoLabel = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -30,6 +34,28 @@ struct GitView: View {
         }
         .onChange(of: model.repoRoot) { _, _ in
             Task { await model.refreshGitStatus() }
+        }
+        .sheet(isPresented: $showLazygit, onDismiss: {
+            Task { await model.refreshGitStatus() }
+        }) {
+            if let cwd = lazygitCwd, !lazygitExecutable.isEmpty {
+                LazygitSheet(
+                    executable: lazygitExecutable,
+                    workingDirectory: cwd,
+                    repoLabel: lazygitRepoLabel,
+                    extraPath: model.loginShellPath,
+                    onClose: { showLazygit = false }
+                )
+                .frame(minWidth: 860, minHeight: 560)
+            } else {
+                VStack(spacing: 12) {
+                    Text("Could not prepare lazygit session.")
+                        .font(.callout)
+                    Button("Close") { showLazygit = false }
+                        .buttonStyle(PressStyle())
+                }
+                .padding(24)
+            }
         }
     }
 
@@ -349,16 +375,16 @@ struct GitView: View {
             GroupedCard {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Open lazygit in Terminal.app for the selected repo.")
+                        Text("Open lazygit inside Prushka L for the selected repo.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
-                        Text("Branches, rebase, force-push — outside this launcher.")
+                        Text("Embedded PTY — branches, rebase, force-push, and the rest of the TUI.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 0)
                     Button {
-                        model.openLazygit()
+                        openLazygitSheet()
                     } label: {
                         Text("Open lazygit")
                             .font(.system(size: 13, weight: .semibold))
@@ -372,6 +398,19 @@ struct GitView: View {
                 }
                 .padding(14)
             }
+        }
+    }
+
+    private func openLazygitSheet() {
+        switch model.prepareLazygitSession() {
+        case .failure(let error):
+            model.actionError = error.localizedDescription
+        case .success(let session):
+            model.actionError = nil
+            lazygitExecutable = session.executable
+            lazygitCwd = session.cwd
+            lazygitRepoLabel = session.repo.label
+            showLazygit = true
         }
     }
 

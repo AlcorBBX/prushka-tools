@@ -2,7 +2,7 @@
 
 Part of [`prushka-tools`](../README.md) — the shared tooling tree that usually sits at `prushka/tools`.
 
-Local macOS control center for a [Prushka](https://github.com/AlcorBBX) checkout: start/stop web, desktop, mobile, API and stems workers, run tab-source demo tools, stage nested-repo changes, draft commit messages via Cursor `agent`, open lazygit, and tail logs — without typing the same shell commands every day.
+Local macOS control center for a [Prushka](https://github.com/AlcorBBX) checkout: start/stop web, desktop, mobile, API and stems workers, run tab-source demo tools, stage nested-repo changes, draft commit messages via Cursor `agent`, run embedded lazygit, and tail logs — without typing the same shell commands every day.
 
 This package is **only the launcher**. It does not contain the Prushka monorepo. Point Settings at a checkout that has:
 
@@ -40,7 +40,7 @@ From a running app: **Settings → Rebuild & Relaunch** runs the same script, st
 1. Open **Prushka L**.
 2. In **Settings**, choose the Prushka repository root (or use the detected path). Use **Rebuild & Relaunch** there after editing the launcher sources.
 3. **Services** — start/stop units, open local URLs, jump to logs.
-4. **Git** — pick nested repo (`front` / `tools` / `scripts`), stage all or selected paths, generate a scoped Conventional Commit message with `agent -p`, commit, push (no `--force`), or open lazygit in Terminal.app.
+4. **Git** — pick nested repo (`front` / `tools` / `scripts`), stage all or selected paths, generate a scoped Conventional Commit message with `agent -p`, commit, push (no `--force`), or open **embedded lazygit** (SwiftTerm PTY sheet).
 5. **Tools** — tab-source fetch / fill / notes-from-lead with forms.
 6. **Logs** — tail `.run/logs/<unit>.log` for launcher-started processes.
 
