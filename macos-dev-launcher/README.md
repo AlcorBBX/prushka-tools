@@ -40,7 +40,7 @@ From a running app: **Settings → Rebuild & Relaunch** runs the same script, st
 1. Open **Prushka L**.
 2. In **Settings**, choose the Prushka repository root (or use the detected path). Use **Rebuild & Relaunch** there after editing the launcher sources.
 3. **Services** — start/stop units, open local URLs, jump to logs.
-4. **Git** — pick nested repo (`front` / `tools` / `scripts`), stage all or selected paths, generate a scoped Conventional Commit message with `agent -p`, commit staged changes, or open lazygit in Terminal.app.
+4. **Git** — pick nested repo (`front` / `tools` / `scripts`), stage all or selected paths, generate a scoped Conventional Commit message with `agent -p`, commit, push (no `--force`), or open lazygit in Terminal.app.
 5. **Tools** — tab-source fetch / fill / notes-from-lead with forms.
 6. **Logs** — tail `.run/logs/<unit>.log` for launcher-started processes.
 

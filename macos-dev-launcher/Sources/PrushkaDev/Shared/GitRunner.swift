@@ -9,7 +9,10 @@ enum GitRunner {
         case unstage(paths: [String])
         case cachedDiff
         case shortLog
+        case unpushedLog
+        case localOnlyLog
         case commit(message: String)
+        case push
     }
 
     static func run(
@@ -41,11 +44,19 @@ enum GitRunner {
             arguments = args
         }
 
+        let timeout: Duration = {
+            switch action {
+            case .push: .seconds(300)
+            case .commit: .seconds(120)
+            default: .seconds(60)
+            }
+        }()
+
         let output = await ProcessRunner.run(
             arguments: arguments,
             cwd: cwd,
             extraPath: extraPath,
-            timeout: .seconds(120)
+            timeout: timeout
         )
         return .success(output)
     }
@@ -79,6 +90,12 @@ enum GitRunner {
             return .success(["git", "diff", "--cached", "--no-color"])
         case .shortLog:
             return .success(["git", "log", "-8", "--format=%s%n%b%n---", "--no-color"])
+        case .unpushedLog:
+            // Commits on this branch not yet on the tracked upstream.
+            return .success(["git", "log", "--format=%h%x09%s", "@{u}..HEAD"])
+        case .localOnlyLog:
+            // Commits not reachable from any remote (no upstream / never pushed).
+            return .success(["git", "log", "--format=%h%x09%s", "--not", "--remotes", "-30"])
         case .commit(let message):
             switch Safety.sanitizeCommitMessage(message) {
             case .failure(let error):
@@ -95,6 +112,9 @@ enum GitRunner {
                 // -F keeps multiline bodies; hooks still run (no --no-verify).
                 return .success(["git", "commit", "-F", url.path])
             }
+        case .push:
+            // Upstream only — no --force / --tags / remote override.
+            return .success(["git", "push"])
         }
     }
 }

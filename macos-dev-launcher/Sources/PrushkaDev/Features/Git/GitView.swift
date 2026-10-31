@@ -20,6 +20,7 @@ struct GitView: View {
             } else {
                 repoPicker
                 statusCard
+                unpushedCard
                 messageCard
                 lazygitCard
             }
@@ -75,7 +76,7 @@ struct GitView: View {
 
     private var statusCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 8) {
                 SectionLabel("Status")
                 Spacer(minLength: 0)
                 if !model.gitBranch.isEmpty {
@@ -85,6 +86,20 @@ struct GitView: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .background(Capsule(style: .continuous).fill(Color.primary.opacity(0.06)))
+                }
+                if let upstream = model.gitUpstream {
+                    Text(upstream)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule(style: .continuous).fill(Color.primary.opacity(0.04)))
+                }
+                if model.gitAhead > 0 {
+                    metaChip("↑\(model.gitAhead)", tint: LauncherTheme.tint(.git))
+                }
+                if model.gitBehind > 0 {
+                    metaChip("↓\(model.gitBehind)", tint: Color(red: 0.94, green: 0.38, blue: 0.30))
                 }
             }
             if let gitStatusError = model.gitStatusError {
@@ -104,6 +119,54 @@ struct GitView: View {
                     }
                 }
                 .padding(14)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var unpushedCard: some View {
+        if !model.gitUnpushedCommits.isEmpty || (!model.gitHasUpstream && model.gitStatusError == nil && !model.gitBranch.isEmpty) {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionLabel(model.gitHasUpstream ? "Unpushed" : "Local only")
+                GroupedCard {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if model.gitUnpushedCommits.isEmpty {
+                            Text(
+                                model.gitHasUpstream
+                                    ? "Nothing to push — branch matches upstream."
+                                    : "No upstream set. Local commits not on any remote will show here."
+                            )
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .padding(14)
+                        } else {
+                            ForEach(Array(model.gitUnpushedCommits.enumerated()), id: \.element.id) { index, commit in
+                                if index > 0 {
+                                    CardDivider()
+                                }
+                                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                    Text(commit.hash)
+                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(LauncherTheme.tint(.git))
+                                        .frame(width: 56, alignment: .leading)
+                                    Text(commit.subject)
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(2)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 9)
+                            }
+                        }
+                    }
+                }
+                if !model.gitHasUpstream {
+                    Text("Set upstream (git push -u) in lazygit before Push works from here.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                }
             }
         }
     }
@@ -239,7 +302,25 @@ struct GitView: View {
                                 || model.commitMessageDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         )
 
-                        if model.gitGenerating {
+                        if model.canPushGit {
+                            Button {
+                                Task { await model.pushGit() }
+                            } label: {
+                                Text(model.gitAhead > 1 ? "Push \(model.gitAhead)" : "Push")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 7)
+                                    .background(
+                                        Capsule(style: .continuous)
+                                            .fill(Color(red: 0.22, green: 0.48, blue: 0.98))
+                                    )
+                            }
+                            .buttonStyle(PressStyle())
+                            .disabled(model.gitBusy || model.gitGenerating)
+                        }
+
+                        if model.gitGenerating || model.gitBusy {
                             ProgressView()
                                 .controlSize(.small)
                         }
@@ -255,7 +336,7 @@ struct GitView: View {
                 }
                 .padding(14)
             }
-            Text("Commit runs git commit -F on staged files only (hooks still run). Use lazygit for the rest.")
+            Text("Commit uses git commit -F on staged files; Push runs git push (no --force). Hooks still run.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
@@ -271,7 +352,7 @@ struct GitView: View {
                         Text("Open lazygit in Terminal.app for the selected repo.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
-                        Text("Diff, commit, push, branches — outside this launcher.")
+                        Text("Branches, rebase, force-push — outside this launcher.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -307,5 +388,14 @@ struct GitView: View {
         }
         .buttonStyle(PressStyle())
         .disabled(model.gitBusy)
+    }
+
+    private func metaChip(_ title: String, tint: Color) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule(style: .continuous).fill(tint.opacity(0.14)))
     }
 }

@@ -29,12 +29,21 @@ public final class LauncherModel {
     // MARK: Git
     var selectedGitRepoID = "front"
     var gitBranch = ""
+    var gitUpstream: String?
+    var gitAhead = 0
+    var gitBehind = 0
     var gitEntries: [GitFileEntry] = []
+    var gitUnpushedCommits: [GitCommitEntry] = []
     var gitSelectedPaths: Set<String> = []
     var commitMessageDraft = ""
     var gitBusy = false
     var gitGenerating = false
     var gitStatusError: String?
+
+    /// Plain `git push` only works with a tracked upstream that is behind local.
+    var canPushGit: Bool { gitHasUpstream && gitAhead > 0 }
+
+    var gitHasUpstream: Bool { gitUpstream != nil }
 
     // MARK: Self-rebuild
     var isRebuilding = false
@@ -422,6 +431,7 @@ public final class LauncherModel {
         gitSelectedPaths = []
         commitMessageDraft = ""
         gitStatusError = nil
+        clearGitSnapshot()
         Task { await refreshGitStatus() }
     }
 
@@ -443,36 +453,14 @@ public final class LauncherModel {
 
     func refreshGitStatus() async {
         guard let root = validatedRoot, let repo = selectedGitRepo else {
-            gitBranch = ""
-            gitEntries = []
+            clearGitSnapshot()
             gitStatusError = "Choose the Prushka checkout in Settings."
             return
         }
         guard !gitBusy else { return }
         gitBusy = true
         defer { gitBusy = false }
-
-        switch await GitRunner.run(action: .status, repo: repo, root: root, extraPath: loginPath) {
-        case .failure(let error):
-            gitBranch = ""
-            gitEntries = []
-            gitStatusError = error.localizedDescription
-        case .success(let output):
-            // status exits 0 even with changes; non-zero usually means not a repo / git missing
-            if output.code != 0 {
-                gitBranch = ""
-                gitEntries = []
-                gitStatusError = output.combined.isEmpty
-                    ? Safety.Failure.gitFailed("exit \(output.code)").localizedDescription
-                    : Safety.Failure.gitFailed(Self.clip(output.combined, fallback: "exit \(output.code)")).localizedDescription
-                return
-            }
-            let snapshot = GitPorcelain.parse(output.stdout)
-            gitBranch = snapshot.branch
-            gitEntries = snapshot.entries
-            gitStatusError = nil
-            gitSelectedPaths = gitSelectedPaths.intersection(Set(snapshot.entries.map(\.path)))
-        }
+        await refreshGitStatusUnlocked(root: root, repo: repo)
     }
 
     func stageGit(all: Bool) async {
@@ -583,6 +571,37 @@ public final class LauncherModel {
                     : Safety.Failure.gitFailed(Self.clip(output.combined, fallback: "exit \(output.code)")).localizedDescription
             } else {
                 commitMessageDraft = ""
+            }
+        }
+        await refreshGitStatusUnlocked(root: root, repo: repo)
+    }
+
+    func pushGit() async {
+        guard let root = validatedRoot, let repo = selectedGitRepo else {
+            actionError = "Choose the Prushka checkout in Settings."
+            return
+        }
+        let ok = Confirm.ask(
+            title: "Push to remote?",
+            message: "Runs git push for \(repo.label)/ (current branch upstream). No --force.",
+            confirm: "Push",
+            style: .informational
+        )
+        guard ok else { return }
+
+        guard !gitBusy else { return }
+        gitBusy = true
+        actionError = nil
+        defer { gitBusy = false }
+
+        switch await GitRunner.run(action: .push, repo: repo, root: root, extraPath: loginPath) {
+        case .failure(let error):
+            actionError = error.localizedDescription
+        case .success(let output):
+            if output.code != 0 {
+                actionError = output.combined.isEmpty
+                    ? Safety.Failure.gitFailed("exit \(output.code)").localizedDescription
+                    : Safety.Failure.gitFailed(Self.clip(output.combined, fallback: "exit \(output.code)")).localizedDescription
             }
         }
         await refreshGitStatusUnlocked(root: root, repo: repo)
@@ -722,23 +741,62 @@ public final class LauncherModel {
     private func refreshGitStatusUnlocked(root: URL, repo: NestedGitRepo) async {
         switch await GitRunner.run(action: .status, repo: repo, root: root, extraPath: loginPath) {
         case .failure(let error):
-            gitBranch = ""
-            gitEntries = []
+            clearGitSnapshot()
             gitStatusError = error.localizedDescription
         case .success(let output):
             if output.code != 0 {
-                gitBranch = ""
-                gitEntries = []
+                clearGitSnapshot()
                 gitStatusError = output.combined.isEmpty
                     ? Safety.Failure.gitFailed("exit \(output.code)").localizedDescription
                     : Safety.Failure.gitFailed(Self.clip(output.combined, fallback: "exit \(output.code)")).localizedDescription
                 return
             }
             let snapshot = GitPorcelain.parse(output.stdout)
-            gitBranch = snapshot.branch
-            gitEntries = snapshot.entries
+            applyGitSnapshot(snapshot)
             gitStatusError = nil
-            gitSelectedPaths = gitSelectedPaths.intersection(Set(snapshot.entries.map(\.path)))
+            await loadUnpushedCommits(repo: repo, root: root, snapshot: snapshot)
+        }
+    }
+
+    private func applyGitSnapshot(_ snapshot: GitStatusSnapshot) {
+        gitBranch = snapshot.branch
+        gitUpstream = snapshot.upstream
+        gitAhead = snapshot.ahead
+        gitBehind = snapshot.behind
+        gitEntries = snapshot.entries
+        gitSelectedPaths = gitSelectedPaths.intersection(Set(snapshot.entries.map(\.path)))
+    }
+
+    private func clearGitSnapshot() {
+        gitBranch = ""
+        gitUpstream = nil
+        gitAhead = 0
+        gitBehind = 0
+        gitEntries = []
+        gitUnpushedCommits = []
+    }
+
+    private func loadUnpushedCommits(
+        repo: NestedGitRepo,
+        root: URL,
+        snapshot: GitStatusSnapshot
+    ) async {
+        let action: GitRunner.Action = snapshot.hasUpstream ? .unpushedLog : .localOnlyLog
+        switch await GitRunner.run(action: action, repo: repo, root: root, extraPath: loginPath) {
+        case .failure:
+            gitUnpushedCommits = []
+        case .success(let output):
+            // Missing upstream makes @{u}..HEAD fail — fall back to local-only.
+            if output.code != 0, snapshot.hasUpstream {
+                switch await GitRunner.run(action: .localOnlyLog, repo: repo, root: root, extraPath: loginPath) {
+                case .success(let fallback) where fallback.code == 0:
+                    gitUnpushedCommits = GitPorcelain.parseCommitLines(fallback.stdout)
+                default:
+                    gitUnpushedCommits = []
+                }
+                return
+            }
+            gitUnpushedCommits = output.code == 0 ? GitPorcelain.parseCommitLines(output.stdout) : []
         }
     }
 

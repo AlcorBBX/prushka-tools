@@ -15,6 +15,9 @@ final class GitTests: XCTestCase {
         """
         let snapshot = GitPorcelain.parse(raw)
         XCTAssertEqual(snapshot.branch, "main")
+        XCTAssertEqual(snapshot.upstream, "origin/main")
+        XCTAssertEqual(snapshot.ahead, 1)
+        XCTAssertEqual(snapshot.behind, 0)
         XCTAssertEqual(snapshot.entries.count, 5)
 
         let byPath = Dictionary(uniqueKeysWithValues: snapshot.entries.map { ($0.path, $0) })
@@ -25,9 +28,33 @@ final class GitTests: XCTestCase {
         XCTAssertEqual(byPath["new.swift"]?.kind, .staged)
     }
 
+    func testPorcelainParsesAheadBehindAndNoUpstream() {
+        let both = GitPorcelain.parse("## feature...origin/feature [ahead 3, behind 2]\n")
+        XCTAssertEqual(both.branch, "feature")
+        XCTAssertEqual(both.upstream, "origin/feature")
+        XCTAssertEqual(both.ahead, 3)
+        XCTAssertEqual(both.behind, 2)
+
+        let local = GitPorcelain.parse("## wip\n")
+        XCTAssertEqual(local.branch, "wip")
+        XCTAssertNil(local.upstream)
+        XCTAssertEqual(local.ahead, 0)
+    }
+
+    func testParseCommitLines() {
+        let commits = GitPorcelain.parseCommitLines("""
+        a1b2c3d\tfeat(GitView): Add push button
+        deadbeef\tfix(Safety): Tighten paths
+        """)
+        XCTAssertEqual(commits.count, 2)
+        XCTAssertEqual(commits[0].hash, "a1b2c3d")
+        XCTAssertEqual(commits[0].subject, "feat(GitView): Add push button")
+    }
+
     func testPorcelainDetachedAndEmpty() {
         let detached = GitPorcelain.parse("## HEAD (no branch)\n")
         XCTAssertEqual(detached.branch, "DETACHED")
+        XCTAssertNil(detached.upstream)
         XCTAssertTrue(detached.entries.isEmpty)
 
         let empty = GitPorcelain.parse("")
