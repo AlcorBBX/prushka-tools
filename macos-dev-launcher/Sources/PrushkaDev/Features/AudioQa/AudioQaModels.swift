@@ -105,16 +105,45 @@ enum AudioQaScreen: String, CaseIterable, Identifiable {
     }
 }
 
+struct AudioQaSectionEntry: Identifiable, Sendable {
+    let id: String
+    let title: String
+    let summary: String
+}
+
+struct AudioQaSuiteEntry: Identifiable, Sendable {
+    let id: String
+    let title: String
+    let summary: String
+    let section: String
+}
+
 enum AudioQaCatalog {
-    static let suites: [(id: String, title: String, summary: String)] = [
-        ("basic-dsp", "Basic DSP", "Sine, harmonics, level, sample rate, silence, buffer faults"),
-        ("clean-vocal", "Clean Vocal", "Formant vowels, mild vibrato, and portamento"),
-        ("vocal-imperfections", "Vocal Imperfections", "Detune, timing, missed and extra notes, breaks"),
-        ("noise-resistance", "Noise Resistance", "White, pink, and brown noise, hum, and clicks"),
-        ("music-interference", "Music Interference", "Instrumental stems that must not count as the singer"),
-        ("mixed", "Mixed Scenarios", "Vocal, accompaniment, and noise together"),
-        ("realtime", "Realtime Processing", "Microphone-sized waits between analysis hops"),
-        ("regression", "Regression", "Scenarios saved from a previous failure"),
-        ("song-performance", "Song Performance", "Creep chorus pitches and timings, with cracks, sags, and breaks"),
+    static let sections: [AudioQaSectionEntry] = [
+        AudioQaSectionEntry(id: "signal", title: "Signal", summary: "Pitch, voice activity, noise, and accompaniment"),
+        AudioQaSectionEntry(id: "performance", title: "Performance", summary: "Sung phrases, cracks, timing, and register changes"),
+        AudioQaSectionEntry(id: "accuracy", title: "Accuracy", summary: "Whether the sung pitch lights the written note chip"),
+        AudioQaSectionEntry(id: "saved", title: "Saved", summary: "Scenarios kept from an earlier failure"),
     ]
+
+    static let suites: [AudioQaSuiteEntry] = [
+        AudioQaSuiteEntry(id: "basic-dsp", title: "Basic DSP", summary: "Sine, harmonics, level, sample rate, silence, buffer faults", section: "signal"),
+        AudioQaSuiteEntry(id: "clean-vocal", title: "Clean Vocal", summary: "Formant vowels, mild vibrato, and portamento", section: "signal"),
+        AudioQaSuiteEntry(id: "noise-resistance", title: "Noise Resistance", summary: "White, pink, and brown noise, hum, and clicks", section: "signal"),
+        AudioQaSuiteEntry(id: "music-interference", title: "Music Interference", summary: "Instrumental stems that must not count as the singer", section: "signal"),
+        AudioQaSuiteEntry(id: "mixed", title: "Mixed Scenarios", summary: "Vocal, accompaniment, and noise together", section: "signal"),
+        AudioQaSuiteEntry(id: "realtime", title: "Realtime Processing", summary: "Microphone-sized waits between analysis hops", section: "signal"),
+        AudioQaSuiteEntry(id: "vocal-imperfections", title: "Vocal Imperfections", summary: "Detune, timing, missed and extra notes, breaks", section: "performance"),
+        AudioQaSuiteEntry(id: "song-performance", title: "Song Performance", summary: "Creep chorus pitches and timings, with cracks, sags, and breaks", section: "performance"),
+        AudioQaSuiteEntry(id: "chip-tracking", title: "Chip Tracking", summary: "In-tune, edge, late, short, and wrong-octave takes against the written chip", section: "accuracy"),
+        AudioQaSuiteEntry(id: "regression", title: "Regression", summary: "Scenarios saved from a previous failure", section: "saved"),
+    ]
+
+    static func suites(in section: String) -> [AudioQaSuiteEntry] {
+        suites.filter { $0.section == section }
+    }
+
+    static func sectionID(for suiteID: String) -> String {
+        suites.first { $0.id == suiteID }?.section ?? sections[0].id
+    }
 }

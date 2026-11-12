@@ -119,33 +119,40 @@ struct AudioQaView: View {
     }
 
     private var suites: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionLabel("Groups")
-            GroupedCard {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(AudioQaCatalog.suites.enumerated()), id: \.element.id) { index, suite in
-                        if index > 0 { CardDivider() }
-                        Button {
-                            store.selectedSuite = suite.id
-                            store.scope = "suite"
-                            store.screen = .runner
-                        } label: {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(suite.title).font(.headline)
-                                Text(suite.summary)
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(AudioQaCatalog.sections) { section in
+                VStack(alignment: .leading, spacing: 8) {
+                    SectionLabel(section.title)
+                    Text(section.summary)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    GroupedCard {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(AudioQaCatalog.suites(in: section.id).enumerated()), id: \.element.id) { index, suite in
+                                if index > 0 { CardDivider() }
+                                Button {
+                                    store.selectedSuite = suite.id
+                                    store.scope = "suite"
+                                    store.screen = .runner
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(suite.title).font(.headline)
+                                        Text(suite.summary)
+                                            .font(.callout)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 10)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
-            .agentTarget("audio-suites")
         }
+        .agentTarget("audio-suites")
     }
 
     private var runner: some View {
@@ -160,8 +167,13 @@ struct AudioQaView: View {
                     }
                     .pickerStyle(.segmented)
                     if store.scope == "suite" {
+                        Picker("Section", selection: sectionBinding) {
+                            ForEach(AudioQaCatalog.sections) { section in
+                                Text(section.title).tag(section.id)
+                            }
+                        }
                         Picker("Suite", selection: binding(\.selectedSuite)) {
-                            ForEach(AudioQaCatalog.suites, id: \.id) { suite in
+                            ForEach(AudioQaCatalog.suites(in: AudioQaCatalog.sectionID(for: store.selectedSuite))) { suite in
                                 Text(suite.title).tag(suite.id)
                             }
                         }
@@ -202,11 +214,16 @@ struct AudioQaView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("\(report.passedCount)/\(report.total) passed")
                             .font(.headline)
-                        ForEach(report.scenarios.filter { !$0.passed }) { scenario in
-                            scenarioBlock(scenario, failed: true)
-                        }
-                        ForEach(report.scenarios.filter(\.passed)) { scenario in
-                            scenarioBlock(scenario, failed: false)
+                        ForEach(groupedResults(report.scenarios), id: \.id) { group in
+                            Text(group.title)
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.top, 4)
+                            ForEach(group.scenarios.filter { !$0.passed }) { scenario in
+                                scenarioBlock(scenario, failed: true)
+                            }
+                            ForEach(group.scenarios.filter(\.passed)) { scenario in
+                                scenarioBlock(scenario, failed: false)
+                            }
                         }
                         if let compare = store.compare {
                             Text("Other run \(compare.id): failed \(compare.failed - report.failed) difference, median cents \(format(compare.summary.medianAbsCents - report.summary.medianAbsCents))")
@@ -306,6 +323,36 @@ struct AudioQaView: View {
         }
         .buttonStyle(PressStyle())
         .agentTarget(target)
+    }
+
+    private var sectionBinding: Binding<String> {
+        Binding(
+            get: { AudioQaCatalog.sectionID(for: store.selectedSuite) },
+            set: { section in
+                guard AudioQaCatalog.sectionID(for: store.selectedSuite) != section,
+                      let suite = AudioQaCatalog.suites(in: section).first else { return }
+                store.selectedSuite = suite.id
+            }
+        )
+    }
+
+    private func groupedResults(_ scenarios: [AudioQaScenarioFile]) -> [(id: String, title: String, scenarios: [AudioQaScenarioFile])] {
+        var grouped: [(id: String, title: String, scenarios: [AudioQaScenarioFile])] = []
+        var placed = Set<String>()
+
+        for section in AudioQaCatalog.sections {
+            let rows = scenarios.filter { AudioQaCatalog.sectionID(for: $0.suite) == section.id }
+            if rows.isEmpty { continue }
+            grouped.append((section.id, section.title, rows))
+            for row in rows { placed.insert(row.id) }
+        }
+
+        let leftovers = scenarios.filter { !placed.contains($0.id) }
+        if !leftovers.isEmpty {
+            grouped.append(("other", "Other", leftovers))
+        }
+
+        return grouped
     }
 
     private func binding<Value>(_ keyPath: ReferenceWritableKeyPath<AudioQaStore, Value>) -> Binding<Value> {
