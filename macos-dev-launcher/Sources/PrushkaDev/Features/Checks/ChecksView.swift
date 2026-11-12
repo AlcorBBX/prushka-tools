@@ -41,6 +41,7 @@ struct ChecksView: View {
 
 private struct QualityFamilyRow: View {
     @Environment(LauncherModel.self) private var model
+    @Environment(AgentCoordinator.self) private var agent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
     let family: QualityFamily
@@ -121,10 +122,15 @@ private struct QualityFamilyRow: View {
             }
         }
         .animation(LauncherMotion.easeOut(reduceMotion: reduceMotion), value: isLogExpanded)
+        .agentRow(family.variants.map(\.id))
         .onAppear {
             if selectedVariantID.isEmpty {
                 selectedVariantID = family.defaultVariantID
             }
+            adoptAgent(agent.cursor)
+        }
+        .onChange(of: agent.cursor?.token) { _, _ in
+            adoptAgent(agent.cursor)
         }
     }
 
@@ -133,6 +139,11 @@ private struct QualityFamilyRow: View {
             insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .top)),
             removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
         )
+    }
+
+    private func adoptAgent(_ cursor: AgentCursor?) {
+        guard let cursor, family.variants.contains(where: { $0.id == cursor.targetID }) else { return }
+        selectedVariantID = cursor.targetID
     }
 
     private var selectedVariantBinding: Binding<String> {
@@ -193,6 +204,7 @@ private struct QualityFamilyRow: View {
                 .buttonStyle(PressStyle())
                 .foregroundStyle(.red)
                 .font(.system(size: 13, weight: .semibold))
+                .agentTarget(selectedVariant.id)
             } else {
                 Button {
                     Task { await model.runQuality(selectedJob) }
@@ -205,6 +217,7 @@ private struct QualityFamilyRow: View {
                         .background(Capsule(style: .continuous).fill(LauncherTheme.tint(.checks)))
                 }
                 .buttonStyle(PressStyle())
+                .agentTarget(selectedVariant.id)
             }
         }
     }

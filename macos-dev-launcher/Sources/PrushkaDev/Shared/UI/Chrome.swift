@@ -119,6 +119,108 @@ struct StatusDot: View {
     }
 }
 
+struct AgentControlBanner: View {
+    @Environment(AgentCoordinator.self) private var agent
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                StatusDot(running: true)
+                Text("Agent is using the app")
+                    .font(.callout.weight(.semibold))
+                Spacer(minLength: 0)
+            }
+            if let cursor = agent.cursor {
+                Text(cursor.line)
+                    .font(.callout.weight(.semibold))
+            }
+            ForEach(earlier) { step in
+                Text(step.line)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(red: 0.20, green: 0.48, blue: 0.95).opacity(0.16))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(agent.cursor.map { "Agent is using the app. \($0.line)" } ?? "Agent is using the app")
+    }
+
+    private var earlier: [AgentCursor] {
+        Array(agent.trail.dropLast().suffix(3).reversed())
+    }
+}
+
+private struct AgentTarget: ViewModifier {
+    @Environment(AgentCoordinator.self) private var agent
+    var id: String
+
+    private var active: Bool {
+        agent.controlling && !id.isEmpty && agent.cursor?.targetID == id
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                if active {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color(red: 0.20, green: 0.48, blue: 0.95), lineWidth: 2)
+                }
+            }
+            .background {
+                if active {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(red: 0.20, green: 0.48, blue: 0.95).opacity(0.14))
+                }
+            }
+            .modifier(AgentScrollAnchor(id: id))
+    }
+}
+
+private struct AgentScrollAnchor: ViewModifier {
+    var id: String
+
+    func body(content: Content) -> some View {
+        if id.isEmpty {
+            content
+        } else {
+            content.id(id)
+        }
+    }
+}
+
+private struct AgentRowHighlight: ViewModifier {
+    @Environment(AgentCoordinator.self) private var agent
+    var ids: [String]
+
+    private var active: Bool {
+        guard agent.controlling, let target = agent.cursor?.targetID else { return false }
+        return ids.contains(target)
+    }
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            if active {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color(red: 0.20, green: 0.48, blue: 0.95).opacity(0.7), lineWidth: 1.5)
+            }
+        }
+    }
+}
+
+extension View {
+    func agentTarget(_ id: String) -> some View {
+        modifier(AgentTarget(id: id))
+    }
+
+    func agentRow(_ ids: [String]) -> some View {
+        modifier(AgentRowHighlight(ids: ids))
+    }
+}
+
 struct ErrorBanner: View {
     let message: String
 
@@ -152,6 +254,7 @@ struct NavIcon: View {
 
 struct SidebarColumn: View {
     @Environment(LauncherModel.self) private var model
+    @Environment(AgentCoordinator.self) private var agent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
     var showsLabels: Bool
@@ -195,6 +298,7 @@ struct SidebarColumn: View {
                 .accessibilityLabel(section.title)
                 .accessibilityAddTraits(model.section == section ? .isSelected : [])
             }
+            agentStatus
         }
         .padding(6)
         .frame(width: showsLabels ? 232 : 52)
@@ -205,6 +309,22 @@ struct SidebarColumn: View {
                 .stroke(LauncherTheme.stroke(scheme), lineWidth: 1)
         }
         .shadow(color: .black.opacity(scheme == .dark ? 0.28 : 0.06), radius: 8, y: 2)
+    }
+
+    private var agentStatus: some View {
+        HStack(spacing: 8) {
+            StatusDot(running: agent.listening)
+            if showsLabels {
+                Text("Agent")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, showsLabels ? 8 : 6)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(agent.listening ? "Agent listening" : "Agent stopped")
     }
 
     private func background(for section: AppSection) -> Color {
@@ -230,7 +350,8 @@ struct SidebarColumn: View {
         case .git: "3"
         case .tools: "4"
         case .logs: "5"
-        case .settings: "6"
+        case .audioQa: "6"
+        case .settings: "7"
         }
     }
 }

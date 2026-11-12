@@ -51,6 +51,7 @@ struct LogsView: View {
                                     }
                             }
                             .buttonStyle(PressStyle())
+                            .agentTarget(id)
                         }
                     }
                     .padding(.vertical, 2)

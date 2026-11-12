@@ -2,6 +2,7 @@ import SwiftUI
 
 public struct RootView: View {
     @Environment(LauncherModel.self) private var model
+    @Environment(AgentCoordinator.self) private var agent
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var width: CGFloat = 1040
@@ -11,6 +12,10 @@ public struct RootView: View {
     public var body: some View {
         let layout = ShellLayout(width: width)
         VStack(alignment: .leading, spacing: 22) {
+            if agent.controlling {
+                AgentControlBanner()
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
             PageHeader(title: model.section.title, subtitle: model.section.subtitle)
             switch layout {
             case .split:
@@ -45,19 +50,32 @@ public struct RootView: View {
         .background(WindowChromeBinder(scheme: scheme))
         .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.88), value: layout)
         .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.86), value: model.section)
+        .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.86), value: agent.controlling)
     }
 
     private var detail: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                detailContent
-                    .id(model.section)
-                    .transition(.opacity.combined(with: .offset(y: 8)))
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    detailContent
+                        .id(model.section)
+                        .transition(.opacity.combined(with: .offset(y: 8)))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 12)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .onChange(of: agent.cursor?.token) { _, token in
+                guard let token, let target = agent.cursor?.targetID, !target.isEmpty else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(90))
+                    guard agent.cursor?.token == token else { return }
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.86)) {
+                        proxy.scrollTo(target, anchor: .center)
+                    }
+                }
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder
@@ -73,6 +91,8 @@ public struct RootView: View {
             ToolsView()
         case .logs:
             LogsView()
+        case .audioQa:
+            AudioQaView()
         case .settings:
             SettingsView()
         }

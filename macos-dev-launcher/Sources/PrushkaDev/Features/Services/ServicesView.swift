@@ -78,6 +78,7 @@ struct ServicesView: View {
                 }
                 .buttonStyle(PressStyle())
                 .disabled(model.isBusy("bundle"))
+                .agentTarget("services-start-default")
 
                 Button {
                     Task { await model.stopAll() }
@@ -94,6 +95,7 @@ struct ServicesView: View {
                 }
                 .buttonStyle(PressStyle())
                 .disabled(model.isBusy("bundle"))
+                .agentTarget("services-stop-all")
 
                 if model.isBusy("bundle") {
                     ProgressView()
@@ -120,6 +122,7 @@ struct ServicesView: View {
 
 private struct ServiceFamilyRow: View {
     @Environment(LauncherModel.self) private var model
+    @Environment(AgentCoordinator.self) private var agent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
     let family: ServiceFamily
@@ -206,13 +209,18 @@ private struct ServiceFamilyRow: View {
             }
         }
         .animation(LauncherMotion.easeOut(reduceMotion: reduceMotion), value: isLogExpanded)
+        .agentRow(family.variants.map(\.id))
         .onAppear {
             if selectedVariantID.isEmpty {
                 selectedVariantID = preferredVariantID
             }
+            adoptAgent(agent.cursor)
             if running {
                 model.refreshServiceLog(unitID: unitID)
             }
+        }
+        .onChange(of: agent.cursor?.token) { _, _ in
+            adoptAgent(agent.cursor)
         }
         .onChange(of: selectedVariantID) { _, newValue in
             guard !newValue.isEmpty else { return }
@@ -228,6 +236,11 @@ private struct ServiceFamilyRow: View {
             insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .top)),
             removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
         )
+    }
+
+    private func adoptAgent(_ cursor: AgentCursor?) {
+        guard let cursor, family.variants.contains(where: { $0.id == cursor.targetID }) else { return }
+        selectedVariantID = cursor.targetID
     }
 
     private var selectedVariantBinding: Binding<String> {
@@ -314,6 +327,7 @@ private struct ServiceFamilyRow: View {
         }
         .buttonStyle(PressStyle())
         .disabled(model.isBusy(unitID) && role != .open)
+        .agentTarget(role == .open ? "" : unitID)
     }
 
     private var collapsedPreview: some View {

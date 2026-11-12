@@ -28,6 +28,10 @@ struct ToolsView: View {
         .onChange(of: model.tools.map(\.id)) { _, _ in
             seed(model.selectedTool)
         }
+        .onChange(of: model.agentToolRevision) { _, _ in
+            text.merge(model.agentToolText) { _, new in new }
+            flags.merge(model.agentToolFlags) { _, new in new }
+        }
         .animation(
             reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.82),
             value: model.selectedToolID
@@ -60,6 +64,7 @@ struct ToolsView: View {
                                 Button("Stop") { model.cancelTool() }
                                     .buttonStyle(PressStyle())
                                     .foregroundStyle(.red)
+                                    .agentTarget("tool-stop")
                                 ProgressView()
                                     .controlSize(.small)
                             } else {
@@ -77,6 +82,7 @@ struct ToolsView: View {
                                 }
                                 .buttonStyle(PressStyle())
                                 .disabled(!canRun(tool))
+                                .agentTarget("tool-run")
                             }
                             Spacer(minLength: 0)
                         }
@@ -114,6 +120,7 @@ struct ToolsView: View {
                 }
                 .frame(minHeight: 180, maxHeight: 320)
             }
+            .agentTarget("tool-output")
         }
     }
 

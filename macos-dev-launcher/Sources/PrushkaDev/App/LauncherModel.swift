@@ -17,6 +17,9 @@ public final class LauncherModel {
     var actionError: String?
     var busyIDs: Set<String> = []
     var selectedToolID = "tab-source-fetch"
+    var agentToolText: [String: String] = [:]
+    var agentToolFlags: [String: Bool] = [:]
+    var agentToolRevision = 0
     var toolOutput = ""
     var toolOutputTitle = ""
     var selectedLogID = "web-dev"
@@ -183,12 +186,12 @@ public final class LauncherModel {
         }
     }
 
-    func stop(unitID: String) async {
+    func stop(unitID: String, confirmed: Bool = false) async {
         switch Safety.validateUnitID(unitID) {
         case .failure(let error):
             actionError = error.localizedDescription
         case .success(let id):
-            if unit(id: id)?.showsExternalBadge == true {
+            if unit(id: id)?.showsExternalBadge == true && !confirmed {
                 let ok = Confirm.ask(
                     title: "Stop external process?",
                     message: "\(UnitFace.title(for: id)) was not started by Prushka L. Stopping it will terminate whatever is on that port.",
@@ -205,14 +208,16 @@ public final class LauncherModel {
         await runScript(name: "up.sh", arguments: ["dev", "all"], busy: "bundle")
     }
 
-    func stopAll() async {
-        let ok = Confirm.ask(
-            title: "Stop all services?",
-            message: "This stops every known Prushka unit, including processes started outside the launcher if they match the usual ports.",
-            confirm: "Stop all",
-            style: .warning
-        )
-        guard ok else { return }
+    func stopAll(confirmed: Bool = false) async {
+        if !confirmed {
+            let ok = Confirm.ask(
+                title: "Stop all services?",
+                message: "This stops every known Prushka unit, including processes started outside the launcher if they match the usual ports.",
+                confirm: "Stop all",
+                style: .warning
+            )
+            guard ok else { return }
+        }
         await runScript(name: "down.sh", arguments: [], busy: "bundle")
     }
 
@@ -247,6 +252,20 @@ public final class LauncherModel {
         let created = ServiceLogState()
         serviceLogs[unitID] = created
         return created
+    }
+
+    func showService(unitID: String) {
+        guard let family = ServiceCatalog.family(containingUnitID: unitID) else { return }
+        if expandedServiceFamilyID != family.id {
+            expandedServiceFamilyID = family.id
+            startServiceLogPolling()
+        }
+        refreshServiceLog(unitID: unitID)
+    }
+
+    func showCheck(id: String) {
+        guard let family = QualityCatalog.family(containingJobID: id) else { return }
+        expandedQualityJobID = family.id
     }
 
     func toggleServiceExpansion(_ familyID: String) {
@@ -449,13 +468,23 @@ public final class LauncherModel {
     // MARK: - Git
 
     func selectGitRepo(_ id: String) {
-        guard GitCatalog.repo(id: id) != nil else { return }
+        guard prepareGitRepo(id) else { return }
+        Task { await refreshGitStatus() }
+    }
+
+    func selectGitRepoAwaitingRefresh(_ id: String) async {
+        guard prepareGitRepo(id) else { return }
+        await refreshGitStatus()
+    }
+
+    private func prepareGitRepo(_ id: String) -> Bool {
+        guard GitCatalog.repo(id: id) != nil else { return false }
         selectedGitRepoID = id
         gitSelectedPaths = []
         commitMessageDraft = ""
         gitStatusError = nil
         clearGitSnapshot()
-        Task { await refreshGitStatus() }
+        return true
     }
 
     func toggleGitPath(_ path: String) {
@@ -556,7 +585,7 @@ public final class LauncherModel {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    func commitWithDraft() async {
+    func commitWithDraft(confirmed: Bool = false) async {
         guard let root = validatedRoot, let repo = selectedGitRepo else {
             actionError = "Choose the Prushka checkout in Settings."
             return
@@ -566,13 +595,15 @@ public final class LauncherModel {
             actionError = "Generate or type a commit message first."
             return
         }
-        let ok = Confirm.ask(
-            title: "Create commit?",
-            message: "Commits staged changes in \(repo.label)/ with the message in the editor. Git hooks still run.",
-            confirm: "Commit",
-            style: .informational
-        )
-        guard ok else { return }
+        if !confirmed {
+            let ok = Confirm.ask(
+                title: "Create commit?",
+                message: "Commits staged changes in \(repo.label)/ with the message in the editor. Git hooks still run.",
+                confirm: "Commit",
+                style: .informational
+            )
+            guard ok else { return }
+        }
 
         guard !gitBusy else { return }
         gitBusy = true
@@ -599,18 +630,20 @@ public final class LauncherModel {
         await refreshGitStatusUnlocked(root: root, repo: repo)
     }
 
-    func pushGit() async {
+    func pushGit(confirmed: Bool = false) async {
         guard let root = validatedRoot, let repo = selectedGitRepo else {
             actionError = "Choose the Prushka checkout in Settings."
             return
         }
-        let ok = Confirm.ask(
-            title: "Push to remote?",
-            message: "Runs git push for \(repo.label)/ (current branch upstream). No --force.",
-            confirm: "Push",
-            style: .informational
-        )
-        guard ok else { return }
+        if !confirmed {
+            let ok = Confirm.ask(
+                title: "Push to remote?",
+                message: "Runs git push for \(repo.label)/ (current branch upstream). No --force.",
+                confirm: "Push",
+                style: .informational
+            )
+            guard ok else { return }
+        }
 
         guard !gitBusy else { return }
         gitBusy = true

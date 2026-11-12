@@ -87,6 +87,7 @@ struct GitView: View {
                         .buttonStyle(PressStyle())
                         .disabled(!available)
                         .opacity(available ? 1 : 0.45)
+                        .agentTarget("git-repo-\(repo.id)")
                         .help(available ? repo.relativePath : "No .git under \(repo.relativePath)/")
                     }
                     Spacer(minLength: 0)
@@ -199,22 +200,22 @@ struct GitView: View {
 
     private var actionsRow: some View {
         HStack(spacing: 8) {
-            gitButton("Refresh") {
+            gitButton("Refresh", target: "git-refresh") {
                 Task { await model.refreshGitStatus() }
             }
-            gitButton("Stage selected") {
+            gitButton("Stage selected", target: "git-stage") {
                 Task { await model.stageGit(all: false) }
             }
             .disabled(model.gitSelectedPaths.isEmpty || model.gitBusy)
-            gitButton("Stage all") {
+            gitButton("Stage all", target: "git-stage-all") {
                 Task { await model.stageGit(all: true) }
             }
             .disabled(model.gitBusy || model.gitEntries.isEmpty)
-            gitButton("Unstage selected") {
+            gitButton("Unstage selected", target: "git-unstage") {
                 Task { await model.unstageGit(all: false) }
             }
             .disabled(model.gitSelectedPaths.isEmpty || model.gitBusy)
-            gitButton("Unstage all") {
+            gitButton("Unstage all", target: "git-unstage-all") {
                 Task { await model.unstageGit(all: true) }
             }
             .disabled(model.gitBusy || model.gitEntries.isEmpty)
@@ -293,6 +294,7 @@ struct GitView: View {
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .fill(LauncherTheme.field(scheme))
                         )
+                        .agentTarget("git-message")
 
                     HStack(spacing: 10) {
                         Button {
@@ -307,6 +309,7 @@ struct GitView: View {
                         }
                         .buttonStyle(PressStyle())
                         .disabled(model.gitBusy || model.gitGenerating)
+                        .agentTarget("git-generate")
 
                         Button {
                             Task { await model.commitWithDraft() }
@@ -327,6 +330,7 @@ struct GitView: View {
                                 || model.gitGenerating
                                 || model.commitMessageDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         )
+                        .agentTarget("git-commit")
 
                         if model.canPushGit {
                             Button {
@@ -344,6 +348,7 @@ struct GitView: View {
                             }
                             .buttonStyle(PressStyle())
                             .disabled(model.gitBusy || model.gitGenerating)
+                            .agentTarget("git-push")
                         }
 
                         if model.gitGenerating || model.gitBusy {
@@ -414,7 +419,7 @@ struct GitView: View {
         }
     }
 
-    private func gitButton(_ title: String, action: @escaping () -> Void) -> some View {
+    private func gitButton(_ title: String, target: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 12, weight: .semibold))
@@ -427,6 +432,7 @@ struct GitView: View {
         }
         .buttonStyle(PressStyle())
         .disabled(model.gitBusy)
+        .agentTarget(target)
     }
 
     private func metaChip(_ title: String, tint: Color) -> some View {

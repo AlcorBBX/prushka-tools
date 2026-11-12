@@ -168,6 +168,7 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
     case git
     case tools
     case logs
+    case audioQa
     case settings
 
     var id: String { rawValue }
@@ -179,6 +180,7 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
         case .git: "Git"
         case .tools: "Tools"
         case .logs: "Logs"
+        case .audioQa: "Audio QA"
         case .settings: "Settings"
         }
     }
@@ -190,6 +192,7 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
         case .git: "Stage files, draft a commit message, embedded lazygit"
         case .tools: "Tab source and demo scripts"
         case .logs: "Output from units started here"
+        case .audioQa: "Deterministic karaoke pitch scenarios"
         case .settings: "Checkout path for this launcher"
         }
     }
@@ -201,6 +204,7 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
         case .git: "arrow.triangle.branch"
         case .tools: "wrench.and.screwdriver.fill"
         case .logs: "text.alignleft"
+        case .audioQa: "waveform"
         case .settings: "gearshape.fill"
         }
     }

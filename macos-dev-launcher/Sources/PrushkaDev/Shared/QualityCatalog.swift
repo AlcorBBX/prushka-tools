@@ -208,6 +208,12 @@ enum QualityCatalog {
         jobs.first { $0.id == id }
     }
 
+    static func family(containingJobID id: String) -> QualityFamily? {
+        families.first { family in
+            family.variants.contains { $0.id == id }
+        }
+    }
+
     static func families(in group: QualityGroup) -> [QualityFamily] {
         families.filter { $0.group == group }
     }
