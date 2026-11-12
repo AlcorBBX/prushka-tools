@@ -115,5 +115,6 @@ enum AudioQaCatalog {
         ("mixed", "Mixed Scenarios", "Vocal, accompaniment, and noise together"),
         ("realtime", "Realtime Processing", "Microphone-sized waits between analysis hops"),
         ("regression", "Regression", "Scenarios saved from a previous failure"),
+        ("song-performance", "Song Performance", "Creep chorus pitches and timings, with cracks, sags, and breaks"),
     ]
 }
