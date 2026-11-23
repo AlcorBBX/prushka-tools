@@ -42,6 +42,7 @@ public final class LauncherModel {
     var gitBusy = false
     var gitGenerating = false
     var gitStatusError: String?
+    var commitAgent = CommitAgentConfig.load()
 
     /// Plain `git push` only works with a tracked upstream that is behind local.
     var canPushGit: Bool { gitHasUpstream && gitAhead > 0 }
@@ -566,6 +567,7 @@ public final class LauncherModel {
         switch await CommitMessageGenerator.generate(
             repo: repo,
             root: root,
+            agent: commitAgent,
             extraPath: loginPath,
             statusText: statusText,
             cachedDiff: cachedDiff,
@@ -576,6 +578,30 @@ public final class LauncherModel {
         case .success(let message):
             commitMessageDraft = message
         }
+    }
+
+    /// Switches the commit-message agent and loads that provider's saved binary path.
+    func setCommitAgentProvider(_ provider: CommitAgentProvider) {
+        UserDefaults.standard.set(provider.rawValue, forKey: CommitAgentProvider.defaultsKey)
+        commitAgent = CommitAgentConfig.load()
+    }
+
+    func setCommitAgentPath(_ path: String) {
+        commitAgent.customPath = path
+        commitAgent.save()
+        commitAgent = CommitAgentConfig.load()
+    }
+
+    /// Empty restores the provider default (`haiku` for Claude Code, `auto` for Cursor).
+    func setCommitAgentModel(_ value: String) {
+        commitAgent.model = value
+        commitAgent.save()
+        commitAgent = CommitAgentConfig.load()
+    }
+
+    /// Resolved binary for the Settings status line, or the reason it is missing.
+    var commitAgentStatus: Result<String, Safety.Failure> {
+        commitAgent.resolveExecutable(extraPath: loginPath)
     }
 
     func copyCommitMessage() {

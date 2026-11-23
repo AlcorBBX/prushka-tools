@@ -225,7 +225,7 @@ enum Safety {
     }
 
     static func requireBinaryOnPath(_ name: String, extraPath: String?) -> Result<String, Failure> {
-        let allowed = Set(["git", "agent", "lazygit"])
+        let allowed = Set(["git", "agent", "claude", "lazygit"])
         guard allowed.contains(name) else {
             return .failure(.badToolBinary(name))
         }
@@ -235,7 +235,9 @@ enum Safety {
         let hint: String
         switch name {
         case "agent":
-            hint = "Install Cursor CLI (https://cursor.com/install) and ensure agent is on your login PATH."
+            hint = CommitAgentProvider.cursor.installHint
+        case "claude":
+            hint = CommitAgentProvider.claude.installHint
         case "lazygit":
             hint = "Install with: brew install lazygit"
         case "git":

@@ -5,6 +5,8 @@ struct SettingsView: View {
     @Environment(LauncherModel.self) private var model
     @Environment(\.colorScheme) private var scheme
     @State private var pathDraft = ""
+    @State private var agentPathDraft = ""
+    @State private var agentModelDraft = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -62,12 +64,121 @@ struct SettingsView: View {
                     .padding(.horizontal, 4)
             }
 
+            commitAgentSection
+
             rebuildSection
         }
-        .onAppear { pathDraft = model.repoRoot }
+        .onAppear {
+            pathDraft = model.repoRoot
+            agentPathDraft = model.commitAgent.customPath
+            agentModelDraft = model.commitAgent.model
+        }
+        .onChange(of: model.commitAgent) { _, newValue in
+            agentPathDraft = newValue.customPath
+            agentModelDraft = newValue.model
+        }
         .onChange(of: model.repoRoot) { _, newValue in
             pathDraft = newValue
         }
+    }
+
+    private var commitAgentSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel("Commit agent")
+            GroupedCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker(
+                        "Agent",
+                        selection: Binding(
+                            get: { model.commitAgent.provider },
+                            set: { model.setCommitAgentProvider($0) }
+                        )
+                    ) {
+                        ForEach(CommitAgentProvider.allCases) { provider in
+                            Text(provider.label).tag(provider)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+
+                    TextField(
+                        "Binary path (optional, default: \(model.commitAgent.provider.binaryName) on PATH)",
+                        text: $agentPathDraft
+                    )
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14, design: .monospaced))
+                    .padding(8)
+                    .background {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(LauncherTheme.field(scheme))
+                    }
+                    .onSubmit { saveAgentDrafts() }
+
+                    TextField(
+                        "Model (default: \(model.commitAgent.provider.defaultModel); \(model.commitAgent.provider.modelHint))",
+                        text: $agentModelDraft
+                    )
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14, design: .monospaced))
+                    .padding(8)
+                    .background {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(LauncherTheme.field(scheme))
+                    }
+                    .onSubmit { saveAgentDrafts() }
+
+                    HStack(spacing: 10) {
+                        Button("Save") { saveAgentDrafts() }
+                            .buttonStyle(PressStyle())
+                        Button("Choose…") { chooseAgentBinary() }
+                            .buttonStyle(PressStyle())
+                        Spacer(minLength: 0)
+                        agentStatusLabel
+                    }
+                }
+                .padding(14)
+            }
+            Text("Drafts commit messages in Git from the staged diff with model \(model.commitAgent.effectiveModel). Runs read-only with no tools; you still review and commit.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    @ViewBuilder
+    private var agentStatusLabel: some View {
+        switch model.commitAgentStatus {
+        case .success(let path):
+            Text(path)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.green)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(path)
+        case .failure(let error):
+            Text("Not found")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.orange)
+                .help(error.localizedDescription)
+        }
+    }
+
+    private func saveAgentDrafts() {
+        model.setCommitAgentModel(agentModelDraft)
+        model.setCommitAgentPath(agentPathDraft)
+    }
+
+    private func chooseAgentBinary() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.treatsFilePackagesAsDirectories = true
+        panel.prompt = "Choose"
+        panel.message = "Select the \(model.commitAgent.provider.label) CLI binary"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        agentPathDraft = url.path
+        model.setCommitAgentPath(url.path)
     }
 
     private var rebuildSection: some View {

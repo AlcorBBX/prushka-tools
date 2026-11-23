@@ -8,6 +8,7 @@ enum CommitMessageGenerator {
     static func generate(
         repo: NestedGitRepo,
         root: URL,
+        agent: CommitAgentConfig,
         extraPath: String?,
         statusText: String,
         cachedDiff: String,
@@ -21,11 +22,12 @@ enum CommitMessageGenerator {
             cwd = url
         }
 
-        switch Safety.requireBinaryOnPath("agent", extraPath: extraPath) {
+        let executable: String
+        switch agent.resolveExecutable(extraPath: extraPath) {
         case .failure(let error):
             return .failure(error)
-        case .success:
-            break
+        case .success(let path):
+            executable = path
         }
 
         let prompt = buildPrompt(
@@ -35,16 +37,7 @@ enum CommitMessageGenerator {
             shortLog: truncate(shortLog, max: maxLogChars)
         )
 
-        // Ask mode is read-only: no git commit / write tools.
-        // --trust skips the interactive workspace-trust prompt required in -p mode.
-        let arguments = [
-            "agent",
-            "-p",
-            "--trust",
-            "--mode", "ask",
-            "--output-format", "text",
-            prompt
-        ]
+        let arguments = agent.provider.arguments(executable: executable, model: agent.model, prompt: prompt)
 
         let output = await ProcessRunner.run(
             arguments: arguments,
@@ -63,7 +56,7 @@ enum CommitMessageGenerator {
 
         let message = sanitizeMessage(output.stdout)
         guard !message.isEmpty else {
-            return .failure(.agentFailed("agent returned an empty message."))
+            return .failure(.agentFailed("\(agent.provider.label) returned an empty message."))
         }
         return .success(message)
     }

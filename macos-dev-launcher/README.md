@@ -2,7 +2,7 @@
 
 Part of [`prushka-tools`](../README.md) — the shared tooling tree that usually sits at `prushka/tools`.
 
-Local macOS control center for a [Prushka](https://github.com/AlcorBBX) checkout: start/stop web, desktop, mobile, API and stems workers, run tab-source demo tools, stage nested-repo changes, draft commit messages via Cursor `agent`, run embedded lazygit, and tail logs — without typing the same shell commands every day.
+Local macOS control center for a [Prushka](https://github.com/AlcorBBX) checkout: start/stop web, desktop, mobile, API and stems workers, run tab-source demo tools, stage nested-repo changes, draft commit messages via Cursor `agent` or Claude Code `claude`, run embedded lazygit, and tail logs — without typing the same shell commands every day.
 
 This package is **only the launcher**. It does not contain the Prushka monorepo. Point Settings at a checkout that has:
 
@@ -16,7 +16,7 @@ This package is **only the launcher**. It does not contain the Prushka monorepo.
 - Swift 6.1+ (Command Line Tools or Xcode)
 - A local Prushka workspace with the scripts above
 - Tools you already use for that workspace (`pnpm`, and optionally `bun`, `go`, Expo, etc.)
-- Optional for the **Git** section: [Cursor CLI](https://cursor.com/install) (`agent`) for commit-message drafts, and [`lazygit`](https://github.com/jesseduffield/lazygit) (`brew install lazygit`)
+- Optional for the **Git** section: [Cursor CLI](https://cursor.com/install) (`agent`) or [Claude Code](https://claude.com/claude-code) (`claude`, signed in) for commit-message drafts — pick one in **Settings → Commit agent**, and [`lazygit`](https://github.com/jesseduffield/lazygit) (`brew install lazygit`)
 
 ## Build
 
@@ -38,9 +38,9 @@ From a running app: **Settings → Rebuild & Relaunch** runs the same script, st
 ## Usage
 
 1. Open **Prushka L**.
-2. In **Settings**, choose the Prushka repository root (or use the detected path). Use **Rebuild & Relaunch** there after editing the launcher sources.
+2. In **Settings**, choose the Prushka repository root (or use the detected path) and the commit agent (Cursor or Claude Code; optional binary path when it is not on your login PATH; model — empty means `haiku` for Claude Code and `auto` for Cursor). Use **Rebuild & Relaunch** there after editing the launcher sources.
 3. **Services** — start/stop units, open local URLs, jump to logs.
-4. **Git** — pick nested repo (`front` / `tools` / `scripts`), stage all or selected paths, generate a scoped Conventional Commit message with `agent -p`, commit, push (no `--force`), or open **embedded lazygit** (SwiftTerm PTY sheet).
+4. **Git** — pick nested repo (`front` / `tools` / `scripts`), stage all or selected paths, generate a scoped Conventional Commit message with the selected agent (`agent -p` or `claude -p`), commit, push (no `--force`), or open **embedded lazygit** (SwiftTerm PTY sheet).
 5. **Tools** — tab-source fetch / fill / notes-from-lead with forms.
 6. **Logs** — tail `.run/logs/<unit>.log` for launcher-started processes.
 

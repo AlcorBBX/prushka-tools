@@ -280,7 +280,7 @@ struct GitView: View {
             SectionLabel("Commit message")
             GroupedCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Draft via Cursor agent from staged changes (Conventional Commits with scope). Commit uses the text below.")
+                    Text("Draft via \(model.commitAgent.provider.label) from staged changes (Conventional Commits with scope). Commit uses the text below. Change the agent in Settings.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
